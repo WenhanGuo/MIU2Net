@@ -6,8 +6,10 @@ from matplotlib.widgets import Slider, TextBox
 
 path = '/Users/danny/Desktop/WL/data_new/kappa/map_24006.fits'
 std_init = 1   # initialize gaussian blur std slidebar
-radius_init = None   # if None: default radius; if int: initialize radius slidebar
-assert type(radius_init) == int   # if specified, size of kernel will be 2*radius + 1
+radius_init = 1
+# radius_init = None
+# if None: default radius; if int: initialize radius slidebar
+# if specified, size of kernel will be 2*radius + 1
 
 # open fits and apply initial gaussian blur
 img = fits.open(path)[0].data * 100
@@ -26,14 +28,14 @@ fig.colorbar(im1, cax=cbar_ax)
 
 # add slidebar for gaussian blur standard deviation
 ax_sigma = plt.axes([0.2, 0.15, 0.65, 0.03])
-sigma_slider = Slider(ax=ax_sigma, label='standard deviation', valmin=0.1, valmax=100, valinit=std_init)
+sigma_slider = Slider(ax=ax_sigma, label='standard deviation', valmin=0.1, valmax=50, valinit=std_init)
 ax_sigma_text = plt.axes([0.85, 0.15, 0.1, 0.03])
 sigma_text_box = TextBox(ax=ax_sigma_text, label='', initial=str(std_init))
 
 # add slidebar for gaussian blur radius
 if radius_init is not None:
     ax_rad = plt.axes([0.2, 0.1, 0.65, 0.03])
-    rad_slider = Slider(ax=ax_rad, label='radius', valmin=1, valmax=500, valinit=radius_init)
+    rad_slider = Slider(ax=ax_rad, label='radius', valmin=1, valmax=100, valinit=radius_init)
     ax_rad_text = plt.axes([0.85, 0.1, 0.1, 0.03])
     rad_text_box = TextBox(ax=ax_rad_text, label='', initial=str(radius_init))
 
