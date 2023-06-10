@@ -5,15 +5,12 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '3,4'
 from model_u2net import u2net_full
 import torch
 from torch import nn
-from torchvision.transforms import Compose, ToTensor
+from torchvision.transforms import Compose, ToTensor, GaussianBlur
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 import math
 import numpy as np
-# import cupy
-# from cupyx.scipy.ndimage import gaussian_filter as gaus_blur
-from scipy.ndimage import gaussian_filter as gaus_blur
 import pandas as pd
 from glob import glob1
 import astropy.io.fits as fits
@@ -122,7 +119,7 @@ def set_parameters():
     epoch = 64
     batch_size = 64
     learning_rate = 1e-4
-    weight_decay = 1e-5
+    weight_decay = 1e-4
     delta = 0.01
 
     data_dir = '/share/lirui/Wenhan/WL/data_new'
@@ -158,6 +155,13 @@ if __name__ == '__main__':
     # setting loss function, optimizer, and scheduler
     loss_fn = nn.HuberLoss(delta=delta)
     loss_fn = loss_fn.to(device)
+    blur1 = GaussianBlur(kernel_size=1, sigma=(1.0, 2.0))
+    blur2 = GaussianBlur(kernel_size=11, sigma=(2.0, 3.0))
+    blur3 = GaussianBlur(kernel_size=21, sigma=(4.0, 6.0))
+    blur4 = GaussianBlur(kernel_size=41, sigma=(6.0, 8.0))
+    blur5 = GaussianBlur(kernel_size=91, sigma=(12.0, 16.0))
+    blur6 = GaussianBlur(kernel_size=151, sigma=(25.0, 30.0))
+
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=learning_rate, 
                                   weight_decay=weight_decay)
     lr_scheduler = create_lr_scheduler(optimizer, len(train_loader), epoch,
@@ -173,6 +177,8 @@ if __name__ == '__main__':
 
     # begin training
     total_train_step = 0
+    loss_list = [[],[],[],[],[],[],[]]
+    
     best_loss = False
     for i in range(epoch):
         print(f"--------------------------Starting epoch {i+1}--------------------------")
@@ -190,42 +196,26 @@ if __name__ == '__main__':
                 outputs = model(gamma)
                 loss_targ = loss_fn(outputs[0], kappa)
                 losses = [loss_targ]
+                losses.append(loss_fn(outputs[1], blur1(kappa)))
+                losses.append(loss_fn(outputs[2], blur2(kappa)))
+                losses.append(loss_fn(outputs[3], blur3(kappa)))
+                losses.append(loss_fn(outputs[4], blur4(kappa)))
+                losses.append(loss_fn(outputs[5], blur5(kappa)))
+                losses.append(loss_fn(outputs[6], blur6(kappa)))
 
-                # original_imgs = cupy.asarray(kappa)
-                # outputs_cupy = cupy.asarray(outputs)
-                original_imgs = kappa.cpu()
-                def append_gb_loss(device, outputs, targets, losses_list, side_id, sigma):
-                    blurred_imgs = gaus_blur(targets, sigma=sigma, order=0)
-                    blurred_imgs = torch.tensor(blurred_imgs)
-                    blurred_imgs = blurred_imgs.to(device, memory_format=torch.channels_last)
-
-                    loss_side = loss_fn(outputs[side_id], blurred_imgs)
-                    losses_list.append(loss_side)
-
-                gb_args = dict(device=device, outputs=outputs, targets=original_imgs, losses_list=losses)
-                append_gb_loss(side_id=1, sigma=1, **gb_args)
-                append_gb_loss(side_id=2, sigma=2, **gb_args)
-                append_gb_loss(side_id=3, sigma=6, **gb_args)
-                append_gb_loss(side_id=4, sigma=12, **gb_args)
-                append_gb_loss(side_id=5, sigma=20, **gb_args)
-                append_gb_loss(side_id=6, sigma=50, **gb_args)
-                
                 train_step_loss = sum(losses)
                 
-                print('targ_loss =', losses[0].item())
-                print('loss 1 =', losses[1].item())
-                print('loss 2 =', losses[2].item())
-                print('loss 3 =', losses[3].item())
-                print('loss 4 =', losses[4].item())
-                print('loss 5 =', losses[5].item())
-                print('loss 6 =', losses[6].item())
-                print('total loss =', train_step_loss.item())
+                loss_list[0].append(losses[0].item())
+                # print('targ_loss =', losses[0].item())
+                # print(f'{losses[1].item()},{losses[2].item()},{losses[3].item()},{losses[4].item()},{losses[5].item()},{losses[6].item()}')
+                # print('total loss =', train_step_loss.item())
 
-                # losses = [loss_fn(outputs[i], kappa) for i in range(len(outputs))]
-                # side_loss = sum(losses) - losses[0]   # total loss for all side maps
-                # targ_loss = losses[0]   # target prediction loss
-                # train_step_loss = sum(losses)
-                # print('total, side, targ =', train_step_loss, side_loss, targ_loss)
+                loss_list[1].append(losses[1].item())
+                loss_list[2].append(losses[2].item())
+                loss_list[3].append(losses[3].item())
+                loss_list[4].append(losses[4].item())
+                loss_list[5].append(losses[5].item())
+                loss_list[6].append(losses[6].item())
 
             # optimizer step
             optimizer.zero_grad()
