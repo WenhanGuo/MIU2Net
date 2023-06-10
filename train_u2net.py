@@ -11,6 +11,9 @@ from torch.utils.tensorboard import SummaryWriter
 
 import math
 import numpy as np
+# import cupy
+# from cupyx.scipy.ndimage import gaussian_filter as gaus_blur
+from scipy.ndimage import gaussian_filter as gaus_blur
 import pandas as pd
 from glob import glob1
 import astropy.io.fits as fits
@@ -57,6 +60,7 @@ class ImageDataset(Dataset):
             gamma = self.transform(gamma)
         if self.target_transform:
             kappa = self.target_transform(kappa)
+        # gamma shape: torch.Size([2, 512, 512]); kappa shape: torch.Size([1, 512, 512])
         return gamma, kappa
 
 
@@ -178,15 +182,50 @@ if __name__ == '__main__':
         model.train()
         for gamma, kappa in train_loader:
             gamma = gamma.to(device, memory_format=torch.channels_last)
+            # gamma shape: (batchsize, 2, 512, 512)
             kappa = kappa.to(device, memory_format=torch.channels_last)
+            # kappa shape: (batchsize, 1, 512, 512)
 
             with torch.cuda.amp.autocast(enabled=scaler is not None):
                 outputs = model(gamma)
-                losses = [loss_fn(outputs[i], kappa) for i in range(len(outputs))]
-                side_loss = sum(losses) - losses[0]   # total loss for all side maps
-                targ_loss = losses[0]   # target prediction loss
+                loss_targ = loss_fn(outputs[0], kappa)
+                losses = [loss_targ]
+
+                # original_imgs = cupy.asarray(kappa)
+                # outputs_cupy = cupy.asarray(outputs)
+                original_imgs = kappa.cpu()
+                def append_gb_loss(device, outputs, targets, losses_list, side_id, sigma):
+                    blurred_imgs = gaus_blur(targets, sigma=sigma, order=0)
+                    blurred_imgs = torch.tensor(blurred_imgs)
+                    blurred_imgs = blurred_imgs.to(device, memory_format=torch.channels_last)
+
+                    loss_side = loss_fn(outputs[side_id], blurred_imgs)
+                    losses_list.append(loss_side)
+
+                gb_args = dict(device=device, outputs=outputs, targets=original_imgs, losses_list=losses)
+                append_gb_loss(side_id=1, sigma=1, **gb_args)
+                append_gb_loss(side_id=2, sigma=2, **gb_args)
+                append_gb_loss(side_id=3, sigma=6, **gb_args)
+                append_gb_loss(side_id=4, sigma=12, **gb_args)
+                append_gb_loss(side_id=5, sigma=20, **gb_args)
+                append_gb_loss(side_id=6, sigma=50, **gb_args)
+                
                 train_step_loss = sum(losses)
-                print('total, side, targ =', train_step_loss, side_loss, targ_loss)
+                
+                print('targ_loss =', losses[0].item())
+                print('loss 1 =', losses[1].item())
+                print('loss 2 =', losses[2].item())
+                print('loss 3 =', losses[3].item())
+                print('loss 4 =', losses[4].item())
+                print('loss 5 =', losses[5].item())
+                print('loss 6 =', losses[6].item())
+                print('total loss =', train_step_loss.item())
+
+                # losses = [loss_fn(outputs[i], kappa) for i in range(len(outputs))]
+                # side_loss = sum(losses) - losses[0]   # total loss for all side maps
+                # targ_loss = losses[0]   # target prediction loss
+                # train_step_loss = sum(losses)
+                # print('total, side, targ =', train_step_loss, side_loss, targ_loss)
 
             # optimizer step
             optimizer.zero_grad()
@@ -201,7 +240,7 @@ if __name__ == '__main__':
             curr_lr = optimizer.param_groups[0]["lr"]
 
             total_train_step += 1
-            if total_train_step % 100 == 0:
+            if total_train_step % 50 == 0:
                 print(f"train step: {total_train_step}, \
                       current loss: {train_step_loss.item()}")
         
