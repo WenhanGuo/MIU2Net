@@ -155,7 +155,7 @@ if __name__ == '__main__':
     # setting loss function, optimizer, and scheduler
     loss_fn = nn.HuberLoss(delta=delta)
     loss_fn = loss_fn.to(device)
-    blur1 = GaussianBlur(kernel_size=1, sigma=(1.0, 2.0))
+    blur1 = GaussianBlur(kernel_size=5, sigma=(2.0, 3.0))
     blur2 = GaussianBlur(kernel_size=11, sigma=(2.0, 3.0))
     blur3 = GaussianBlur(kernel_size=21, sigma=(4.0, 6.0))
     blur4 = GaussianBlur(kernel_size=41, sigma=(6.0, 8.0))
@@ -232,7 +232,9 @@ if __name__ == '__main__':
             total_train_step += 1
             if total_train_step % 50 == 0:
                 print(f"train step: {total_train_step}, \
-                      current loss: {train_step_loss.item()}")
+                      total loss: {train_step_loss.item():.3}, \
+                      targ loss: {losses[0].item():.3},\n \
+                      side loss: {losses[1].item():.3},{losses[2].item():.3},{losses[3].item():.3},{losses[4].item():.3},{losses[5].item():.3},{losses[6].item():.3}")
         
         # validation steps
         model.eval()
