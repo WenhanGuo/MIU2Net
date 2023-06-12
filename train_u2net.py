@@ -5,81 +5,18 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '3,4'
 from model_u2net import u2net_full
 import torch
 from torch import nn
-from torchvision.transforms import Compose, ToTensor, GaussianBlur
-from torch.utils.data import Dataset, DataLoader
+import transforms as T
+from torchvision.transforms import GaussianBlur
+from torch.utils.data import DataLoader
+from my_dataset import ImageDataset
 from torch.utils.tensorboard import SummaryWriter
 
 import math
-import numpy as np
-import pandas as pd
 from glob import glob1
-import astropy.io.fits as fits
 
 # define training device (cpu/gpu)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print('device =', device)
-
-# Dataset class for our own data structure
-class ImageDataset(Dataset):
-    def __init__(self, catalog, data_dir, transform=None, target_transform=None):
-        """
-        catalog: name of .csv file containing image names to be read
-        data_dir: path to data directory containing gamma1, gamma2, kappa folders
-        transform: transformations to input data (gamma) prior to training
-        target_transform: transformation to target data (kappa) prior to training 
-        """
-        self.img_names = pd.read_csv(catalog)
-        self.data_dir = data_dir
-        self.transform = transform
-        self.target_transform = target_transform
-    
-    def __len__(self):
-        return len(self.img_names)
-    
-    def read_img(self, idx, img_type=['gamma1', 'gamma2', 'kappa']):
-        img_name = self.img_names[img_type][idx]   # get single image name
-        img_path = os.path.join(self.data_dir, img_type, img_name)
-        with fits.open(img_path, memmap=False) as f:
-            img = f[0].data   # read image into numpy array
-        return np.float32(img)   # force apply float32 to resolve endian conflict
-    
-    def __getitem__(self, idx):
-        # read in images
-        gamma1 = self.read_img(idx, img_type='gamma1')
-        gamma2 = self.read_img(idx, img_type='gamma2')
-        kappa = self.read_img(idx, img_type='kappa')
-        # reformat data shapes
-        gamma = np.array([gamma1, gamma2])
-        gamma = np.moveaxis(gamma, 0, 2)
-        kappa = np.expand_dims(kappa, 2)
-        # apply transforms
-        if self.transform:
-            gamma = self.transform(gamma)
-        if self.target_transform:
-            kappa = self.target_transform(kappa)
-        # gamma shape: torch.Size([2, 512, 512]); kappa shape: torch.Size([1, 512, 512])
-        return gamma, kappa
-
-
-# add gaussian noise to shear
-class AddGaussianNoise(object):
-    def __init__(self, n_galaxy, mean=0.):
-        """
-        calculate the gaussian noise standard deviation to be added to shear.
-        please refer to https://articles.adsabs.harvard.edu/pdf/2004MNRAS.350..893H Eq.12. 面积替换为方形的
-        noise_std^2 = {sigma_e^2 / 2} / {θ_G^2 * n_galaxy}
-        """
-        self.n_galaxy = n_galaxy
-        self.mean = mean
-
-    def __call__(self, tensor):
-        sigma_e = 0.4   # rms amplitude of the intrinsic ellipticity distribution
-        theta_G = 0.205   # pixel side length in arcmin (gaussian smoothing window)
-        variance = (sigma_e**2 / 2) / (theta_G**2 * self.n_galaxy)
-        std = np.sqrt(variance)
-        return tensor + torch.randn(tensor.size()) * std + self.mean
-        # for 50 galaxies per pix, std = 0.1951; 
-        # for 20 galaxies per pix, std = 0.3085
 
 
 def create_lr_scheduler(optimizer,
@@ -130,14 +67,24 @@ if __name__ == '__main__':
     # set hyperparameters
     set_parameters()
 
-    # prepare train and validation datasets
-    ds_args = dict(data_dir=data_dir, 
-                   transform=Compose([ToTensor(), 
-                                      AddGaussianNoise(n_galaxy=50)
-                                      ]), 
-                   target_transform=Compose([ToTensor()]))
-    train_data = ImageDataset(catalog=os.path.join(data_dir, 'train.csv'), **ds_args)
-    val_data = ImageDataset(catalog=os.path.join(data_dir, 'validation.csv'), **ds_args)
+    # prepare train and validation datasets; augment data with flip & rotations; add noise
+    train_args = dict(data_dir=data_dir, 
+                      transforms=T.Compose([
+                          T.ToTensor(), 
+                          T.RandomHorizontalFlip(prob=0.5), 
+                          T.RandomVerticalFlip(prob=0.5), 
+                          T.DiscreteRotation(angles=[0,90,180,270])
+                          ]), 
+                      gaus_noise=T.AddGaussianNoise(n_galaxy=50)
+                      )
+    valid_args = dict(data_dir=data_dir, 
+                      transforms=T.Compose([
+                          T.ToTensor()
+                          ]), 
+                      gaus_noise=T.AddGaussianNoise(n_galaxy=50)
+                      )
+    train_data = ImageDataset(catalog=os.path.join(data_dir, 'train.csv'), **train_args)
+    val_data = ImageDataset(catalog=os.path.join(data_dir, 'validation.csv'), **valid_args)
     # prepare train and validation dataloaders
     loader_args = dict(batch_size=batch_size, num_workers=os.cpu_count(), pin_memory=True)
     train_loader = DataLoader(train_data, shuffle=True, **loader_args)

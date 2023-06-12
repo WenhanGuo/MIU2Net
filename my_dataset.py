@@ -7,17 +7,17 @@ import astropy.io.fits as fits
 
 # Dataset class for our own data structure
 class ImageDataset(Dataset):
-    def __init__(self, catalog, data_dir, transform=None, target_transform=None):
+    def __init__(self, catalog, data_dir, transforms=None, gaus_noise=None):
         """
         catalog: name of .csv file containing image names to be read
         data_dir: path to data directory containing gamma1, gamma2, kappa folders
-        transform: transformations to input data (gamma) prior to training
-        target_transform: transformation to target data (kappa) prior to training 
+        transforms: equivariant transformations to input data (gamma) and target (kappa) prior to training
+        gaus_noise: adding gaussian noise to input data (gamma) prior to training 
         """
         self.img_names = pd.read_csv(catalog)
         self.data_dir = data_dir
-        self.transform = transform
-        self.target_transform = target_transform
+        self.transforms = transforms
+        self.gaus_noise = gaus_noise
     
     def __len__(self):
         return len(self.img_names)
@@ -39,9 +39,10 @@ class ImageDataset(Dataset):
         gamma = np.moveaxis(gamma, 0, 2)
         kappa = np.expand_dims(kappa, 2)
         # apply transforms
-        if self.transform:
-            gamma = self.transform(gamma)
-        if self.target_transform:
-            kappa = self.target_transform(kappa)
+        if self.transforms:
+            gamma, kappa = self.transforms(gamma, kappa)
+        if self.gaus_noise:
+            gamma = self.gaus_noise(gamma)
+        
         # gamma shape: torch.Size([2, 512, 512]); kappa shape: torch.Size([1, 512, 512])
         return gamma, kappa

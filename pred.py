@@ -1,12 +1,13 @@
 import torch
-from torchvision.transforms import Compose, ToTensor
+import transforms as T
+from my_dataset import ImageDataset
 from torch.utils.data import DataLoader, Subset
 import os
 import argparse
 import numpy as np
 import pandas as pd
 import astropy.io.fits as fits
-from train_u2net import ImageDataset, AddGaussianNoise
+
 
 # define training device (cpu/gpu)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -39,12 +40,13 @@ if __name__ == '__main__':
     test_cat = test_cat[:test_num]
 
     # load test dataset and dataloader
-    test_data = ImageDataset(catalog=os.path.join(data_dir, 'test.csv'), 
-                            data_dir=data_dir, 
-                            transform=Compose([ToTensor(), 
-                                               AddGaussianNoise(n_galaxy=50)
-                                               ]), 
-                            target_transform=Compose([ToTensor()]))
+    test_args = dict(data_dir=data_dir, 
+                     transforms=T.Compose([
+                         T.ToTensor()
+                         ]), 
+                     gaus_noise=T.AddGaussianNoise(n_galaxy=50)
+                     )
+    test_data = ImageDataset(catalog=os.path.join(data_dir, 'test.csv'), **test_args)
     test_data = Subset(test_data, np.arange(test_num))
     test_dataloader = DataLoader(test_data, shuffle=False, batch_size=1)
 
