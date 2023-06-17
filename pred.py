@@ -14,13 +14,6 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print('device =', device)
 
 
-# define global parameters
-def set_parameters():
-    global test_num, data_dir
-    test_num = 64
-    data_dir = '/share/lirui/Wenhan/WL/data_new'
-    return
-
 def save_img(pred, true, res, fname):
     hdu = fits.PrimaryHDU(pred)
     hdu.writeto(fname, overwrite=True)
@@ -31,23 +24,24 @@ def save_img(pred, true, res, fname):
 def get_args():
     parser = argparse.ArgumentParser(description='Predict kappa from test shear')
     parser.add_argument('name', type=str, help='name of weights file')
+    parser.add_argument("--num", default=32, type=int, help='number of test images to run')
+    parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/data_new', type=str, help='data directory')
     return parser.parse_args()
 
-if __name__ == '__main__':
-    args = get_args()
-    set_parameters()
-    test_cat = pd.read_csv(os.path.join(data_dir, 'test.csv'))
-    test_cat = test_cat[:test_num]
+def main(args):
+    test_cat = pd.read_csv(os.path.join(args.dir, 'test.csv'))
+    assert args.num <= len(test_cat)
+    test_cat = test_cat[:args.num]
 
     # load test dataset and dataloader
-    test_args = dict(data_dir=data_dir, 
+    test_args = dict(data_dir=args.dir, 
                      transforms=T.Compose([
                          T.ToTensor()
                          ]), 
                      gaus_noise=T.AddGaussianNoise(n_galaxy=50)
                      )
-    test_data = ImageDataset(catalog=os.path.join(data_dir, 'test.csv'), **test_args)
-    test_data = Subset(test_data, np.arange(test_num))
+    test_data = ImageDataset(catalog=os.path.join(args.dir, 'test.csv'), **test_args)
+    test_data = Subset(test_data, np.arange(args.num))
     test_dataloader = DataLoader(test_data, shuffle=False, batch_size=1)
 
     # load model weights
@@ -69,3 +63,8 @@ if __name__ == '__main__':
             map_path = os.path.join('./result/prediction', map_name)
             save_img(y_pred, y_true, res, map_path)
             test_step += 1
+
+
+if __name__ == '__main__':
+    args = get_args()
+    main(args)
