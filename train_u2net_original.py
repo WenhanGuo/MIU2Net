@@ -13,10 +13,24 @@ from torch.utils.tensorboard import SummaryWriter
 
 import math
 from glob import glob1
+from prettytable import PrettyTable
 
 # define training device (cpu/gpu)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print('device =', device)
+
+
+def count_parameters(model):
+    table = PrettyTable(["Modules", "Parameters"])
+    total_params = 0
+    for name, parameter in model.named_parameters():
+        if not parameter.requires_grad: continue
+        params = parameter.numel()
+        table.add_row([name, params])
+        total_params+=params
+    print(table)
+    print(f"Total Trainable Params: {total_params}")
+    return total_params
 
 
 def create_lr_scheduler(optimizer,
@@ -93,6 +107,7 @@ if __name__ == '__main__':
     # initialize UNet model
     model = u2net_full()
     model = model.to(memory_format=torch.channels_last)
+    # count_parameters(model)
     # data parallel training on multiple GPUs (restrained by cuda visible devices)
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
