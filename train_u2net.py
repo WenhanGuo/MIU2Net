@@ -16,10 +16,6 @@ from glob import glob1
 from prettytable import PrettyTable
 import datetime
 
-# define training device (cpu/gpu)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print('device =', device)
-
 
 def count_parameters(model):
     table = PrettyTable(["Modules", "Parameters"])
@@ -73,13 +69,13 @@ def main(args):
                           T.RandomVerticalFlip(prob=0.5), 
                           T.DiscreteRotation(angles=[0,90,180,270])
                           ]), 
-                      gaus_noise=T.AddGaussianNoise(n_galaxy=50)
+                      gaus_noise=T.AddGaussianNoise(n_galaxy=args.n_galaxy)
                       )
     valid_args = dict(data_dir=args.dir, 
                       transforms=T.Compose([
                           T.ToTensor()
                           ]), 
-                      gaus_noise=T.AddGaussianNoise(n_galaxy=50)
+                      gaus_noise=T.AddGaussianNoise(n_galaxy=args.n_galaxy)
                       )
     train_data = ImageDataset(catalog=os.path.join(args.dir, 'train.csv'), **train_args)
     val_data = ImageDataset(catalog=os.path.join(args.dir, 'validation.csv'), **valid_args)
@@ -108,6 +104,7 @@ def main(args):
     blur4 = GaussianBlur(kernel_size=41, sigma=(6.0, 8.0))
     blur5 = GaussianBlur(kernel_size=91, sigma=(12.0, 16.0))
     blur6 = GaussianBlur(kernel_size=151, sigma=(25.0, 30.0))
+    blur_fns = [blur1, blur2, blur3, blur4, blur5, blur6]
 
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=args.lr, 
                                   weight_decay=args.weight_decay)
@@ -142,16 +139,11 @@ def main(args):
                 loss_targ = loss_fn(outputs[0], kappa)
                 # native mode: Huber loss based on true kappa for every side output
                 if args.loss_mode == 'native':
-                    losses = [loss_fn(outputs[i], kappa) for i in range(len(outputs))]
+                    losses = [loss_fn(outputs[j], kappa) for j in range(len(outputs))]
                 # gaus mode: Huber loss based on different levels of gaussian blurred kappa
                 elif args.loss_mode == 'gaus':
-                    losses = [loss_targ]
-                    losses.append(loss_fn(outputs[1], blur1(kappa)))
-                    losses.append(loss_fn(outputs[2], blur2(kappa)))
-                    losses.append(loss_fn(outputs[3], blur3(kappa)))
-                    losses.append(loss_fn(outputs[4], blur4(kappa)))
-                    losses.append(loss_fn(outputs[5], blur5(kappa)))
-                    losses.append(loss_fn(outputs[6], blur6(kappa)))
+                    losses = [loss_fn(outputs[j+1], blur_fns[j](kappa)) for j in range(len(outputs)-1)]
+                    losses.insert(0, loss_targ)
 
                 train_step_loss = sum(losses)
 
@@ -168,7 +160,8 @@ def main(args):
             curr_lr = optimizer.param_groups[0]["lr"]
 
             total_train_step += 1
-            if total_train_step % (len(train_loader) // 6) == 0:
+            # print 5 train losses per epoch
+            if total_train_step % (len(train_loader) // 5) == 0:
                 print(f"train step: {total_train_step}, \
                       total loss: {train_step_loss.item():.3}, \
                       targ loss: {losses[0].item():.3},\n \
@@ -208,6 +201,7 @@ def get_args():
     import argparse
     parser = argparse.ArgumentParser(description='Train U2Net')
     parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/data_new', type=str, help='data directory')
+    parser.add_argument("-g", "--n-galaxy", default=50, type=float, help='number of galaxies per arcmin (to determine noise level)')
     parser.add_argument("-e", "--epochs", default=64, type=int, help='number of total epochs to train')
     parser.add_argument("-b", "--batch-size", default=64, type=int, help='batch size')
     parser.add_argument("--lr", default=1e-4, type=float, help='initial learning rate')
@@ -225,4 +219,9 @@ if __name__ == '__main__':
     for arg in vars(args):
         table.add_row([arg, getattr(args, arg)])
     print(table)
+
+    # define training device (cpu/gpu)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print('device =', device)
+
     main(args)
