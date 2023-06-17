@@ -1,6 +1,6 @@
 #! -*- coding: utf-8 -*-
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '3,4'
+os.environ['CUDA_VISIBLE_DEVICES'] = '4,5'
 
 from model_u2net import u2net_full
 import torch
@@ -14,6 +14,7 @@ from torch.utils.tensorboard import SummaryWriter
 import math
 from glob import glob1
 from prettytable import PrettyTable
+import datetime
 
 # define training device (cpu/gpu)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -62,27 +63,10 @@ def create_lr_scheduler(optimizer,
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=f)
 
 
-# set hyperparameters
-def set_parameters():
-    global epoch, batch_size, learning_rate, gamma, weight_decay, delta
-    global data_dir
-
-    epoch = 128
-    batch_size = 64
-    learning_rate = 1e-4
-    weight_decay = 1e-4
-    delta = 0.01
-
-    data_dir = '/share/lirui/Wenhan/WL/data_new'
-    return
-
-
-if __name__ == '__main__':
-    # set hyperparameters
-    set_parameters()
+def main(args):
 
     # prepare train and validation datasets; augment data with flip & rotations; add noise
-    train_args = dict(data_dir=data_dir, 
+    train_args = dict(data_dir=args.dir, 
                       transforms=T.Compose([
                           T.ToTensor(), 
                           T.RandomHorizontalFlip(prob=0.5), 
@@ -91,16 +75,16 @@ if __name__ == '__main__':
                           ]), 
                       gaus_noise=T.AddGaussianNoise(n_galaxy=50)
                       )
-    valid_args = dict(data_dir=data_dir, 
+    valid_args = dict(data_dir=args.dir, 
                       transforms=T.Compose([
                           T.ToTensor()
                           ]), 
                       gaus_noise=T.AddGaussianNoise(n_galaxy=50)
                       )
-    train_data = ImageDataset(catalog=os.path.join(data_dir, 'train.csv'), **train_args)
-    val_data = ImageDataset(catalog=os.path.join(data_dir, 'validation.csv'), **valid_args)
+    train_data = ImageDataset(catalog=os.path.join(args.dir, 'train.csv'), **train_args)
+    val_data = ImageDataset(catalog=os.path.join(args.dir, 'validation.csv'), **valid_args)
     # prepare train and validation dataloaders
-    loader_args = dict(batch_size=batch_size, num_workers=os.cpu_count(), pin_memory=True)
+    loader_args = dict(batch_size=args.batch_size, num_workers=os.cpu_count(), pin_memory=True)
     train_loader = DataLoader(train_data, shuffle=True, **loader_args)
     val_loader = DataLoader(val_data, shuffle=True, drop_last=True, **loader_args)
 
@@ -115,8 +99,9 @@ if __name__ == '__main__':
     torch.cuda.empty_cache()
 
     # setting loss function, optimizer, and scheduler
-    loss_fn = nn.HuberLoss(delta=delta)
+    loss_fn = nn.HuberLoss(delta=args.delta)
     loss_fn = loss_fn.to(device)
+    # setting gaussian blur parameters for gaus mode loss function; not used if args.loss_mode == native
     blur1 = GaussianBlur(kernel_size=5, sigma=(2.0, 3.0))
     blur2 = GaussianBlur(kernel_size=11, sigma=(2.0, 3.0))
     blur3 = GaussianBlur(kernel_size=21, sigma=(4.0, 6.0))
@@ -124,9 +109,9 @@ if __name__ == '__main__':
     blur5 = GaussianBlur(kernel_size=91, sigma=(12.0, 16.0))
     blur6 = GaussianBlur(kernel_size=151, sigma=(25.0, 30.0))
 
-    optimizer = torch.optim.AdamW(params=model.parameters(), lr=learning_rate, 
-                                  weight_decay=weight_decay)
-    lr_scheduler = create_lr_scheduler(optimizer, len(train_loader), epoch,
+    optimizer = torch.optim.AdamW(params=model.parameters(), lr=args.lr, 
+                                  weight_decay=args.weight_decay)
+    lr_scheduler = create_lr_scheduler(optimizer, len(train_loader), args.epochs,
                                        warmup=True, warmup_epochs=3)
     scaler = torch.cuda.amp.GradScaler()   # Use torch.cuda.amp for mixed precision training
 
@@ -139,9 +124,8 @@ if __name__ == '__main__':
 
     # begin training
     total_train_step = 0
-    
     best_loss = False
-    for i in range(epoch):
+    for i in range(args.epochs):
         print(f"--------------------------Starting epoch {i+1}--------------------------")
         val_loss = 0.0
 
@@ -156,7 +140,19 @@ if __name__ == '__main__':
             with torch.cuda.amp.autocast(enabled=scaler is not None):
                 outputs = model(gamma)
                 loss_targ = loss_fn(outputs[0], kappa)
-                losses = [loss_fn(outputs[i], kappa) for i in range(len(outputs))]
+                # native mode: Huber loss based on true kappa for every side output
+                if args.loss_mode == 'native':
+                    losses = [loss_fn(outputs[i], kappa) for i in range(len(outputs))]
+                # gaus mode: Huber loss based on different levels of gaussian blurred kappa
+                elif args.loss_mode == 'gaus':
+                    losses = [loss_targ]
+                    losses.append(loss_fn(outputs[1], blur1(kappa)))
+                    losses.append(loss_fn(outputs[2], blur2(kappa)))
+                    losses.append(loss_fn(outputs[3], blur3(kappa)))
+                    losses.append(loss_fn(outputs[4], blur4(kappa)))
+                    losses.append(loss_fn(outputs[5], blur5(kappa)))
+                    losses.append(loss_fn(outputs[6], blur6(kappa)))
+
                 train_step_loss = sum(losses)
 
             # optimizer step
@@ -172,7 +168,7 @@ if __name__ == '__main__':
             curr_lr = optimizer.param_groups[0]["lr"]
 
             total_train_step += 1
-            if total_train_step % 50 == 0:
+            if total_train_step % (len(train_loader) // 6) == 0:
                 print(f"train step: {total_train_step}, \
                       total loss: {train_step_loss.item():.3}, \
                       targ loss: {losses[0].item():.3},\n \
@@ -206,3 +202,27 @@ if __name__ == '__main__':
     
     print(f"best epoch number is {best_epoch}.")
     writer.close()
+
+
+def get_args():
+    import argparse
+    parser = argparse.ArgumentParser(description='Train U2Net')
+    parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/data_new', type=str, help='data directory')
+    parser.add_argument("-e", "--epochs", default=64, type=int, help='number of total epochs to train')
+    parser.add_argument("-b", "--batch-size", default=64, type=int, help='batch size')
+    parser.add_argument("--lr", default=1e-4, type=float, help='initial learning rate')
+    parser.add_argument("--loss-mode", default='native', type=str, choices=['native', 'gaus'], help='loss function mode')
+    parser.add_argument("--weight-decay", default=1e-4, type=float, help='weight decay for AdamW optimizer')
+    parser.add_argument("--delta", default=0.01, type=float, help='delta value for Huber loss')
+    
+    return parser.parse_args()
+
+
+if __name__ == '__main__':
+    args = get_args()
+    table = PrettyTable(["Arguments", "Values"])
+    table.add_row(['start_time', datetime.datetime.now()])
+    for arg in vars(args):
+        table.add_row([arg, getattr(args, arg)])
+    print(table)
+    main(args)
