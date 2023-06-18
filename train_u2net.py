@@ -12,6 +12,7 @@ from my_dataset import ImageDataset
 from torch.utils.tensorboard import SummaryWriter
 
 import math
+import numpy as np
 from glob import glob1
 from prettytable import PrettyTable
 import datetime
@@ -87,7 +88,8 @@ def main(args):
     # initialize UNet model
     model = u2net_full()
     model = model.to(memory_format=torch.channels_last)
-    # count_parameters(model)
+    if args.param_count == True:
+        count_parameters(model)
     # data parallel training on multiple GPUs (restrained by cuda visible devices)
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
@@ -177,6 +179,15 @@ def main(args):
                 val_step_loss = loss_fn(outputs, kappa)
                 val_loss += val_step_loss.item()
 
+        # printing final 1x1 convolution layer (learned weights for each side outputs)
+        for name, param in model.named_parameters():
+            # if single gpu, name == 'out_conv.weight'; if multiple gpus, name == 'module.out_conv.weight'
+            if param.requires_grad and 'out_conv.weight' in name:
+                last_w = np.array(torch.flatten(param.data.cpu()))
+            elif param.requires_grad and 'out_conv.bias' in name:
+                last_b = param.data.item()
+                print(f'1x1 conv weights = {last_w.round(3)}, bias = {last_b:.3}')
+
         # printing epoch stats & writing to tensorboard
         print(f"epoch training loss = {train_step_loss}", f"LR = {curr_lr}")
         print(f"avg validation loss = {val_loss/len(val_loader)}")
@@ -208,6 +219,7 @@ def get_args():
     parser.add_argument("--loss-mode", default='native', type=str, choices=['native', 'gaus'], help='loss function mode')
     parser.add_argument("--weight-decay", default=1e-4, type=float, help='weight decay for AdamW optimizer')
     parser.add_argument("--delta", default=0.01, type=float, help='delta value for Huber loss')
+    parser.add_argument("--param-count", default=False, action='store_true', help='show model parameter count summary')
     
     return parser.parse_args()
 
