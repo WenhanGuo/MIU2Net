@@ -1,4 +1,3 @@
-# %%
 import scipy.ndimage as ndimage
 import astropy.io.fits as pyfits
 import matplotlib.pyplot as plt
@@ -11,8 +10,6 @@ def read_fits(name):
         res = f[2].data * 100
     return pred, true, res
 
-fnames = sorted(glob('./result/prediction/*fits'))
-
 def draw(plot_id, data, title, scale=[-2, 5], cmap=plt.cm.jet, fontsize=18):
     plt.subplot(2, 2, plot_id)
     plt.imshow(data, cmap=cmap, vmin=scale[0], vmax=scale[1])
@@ -21,11 +18,11 @@ def draw(plot_id, data, title, scale=[-2, 5], cmap=plt.cm.jet, fontsize=18):
     plt.yticks([])
 
 
+fnames = sorted(glob('./result/prediction/*fits'))
+
 for i in range(len(fnames)):
     name = fnames[i]
     pred, true, res = read_fits(name)
-    pred = pred
-    res = true - pred
     res_smooth = ndimage.gaussian_filter(res, sigma=5, order=0)
 
     fig = plt.figure(figsize=(8,7))
@@ -44,5 +41,3 @@ for i in range(len(fnames)):
     plt.savefig(save_dir)
     print(f"saved figure {i+1}: {name}")
     plt.close()
-
-# %%
