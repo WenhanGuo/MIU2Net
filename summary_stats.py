@@ -3,7 +3,6 @@ import numpy as np
 import scipy.ndimage as ndimage
 from glob import glob
 import astropy.io.fits as fits
-from astropy.io import fits
 import matplotlib.pyplot as plt
 from skimage.feature import peak_local_max
 from scipy.spatial import KDTree
@@ -12,10 +11,10 @@ from scipy.spatial import KDTree
 def read_fits(name):
     with fits.open(name, memmap=False) as f:
         pred = f[0].data
-        # pred = ndimage.gaussian_filter(pred, sigma=1, order=0)
         true = f[1].data
-        # true = ndimage.gaussian_filter(true, sigma=1, order=0)
         res = f[2].data
+        pred = ndimage.gaussian_filter(pred, sigma=2, radius=2, order=0)
+        true = ndimage.gaussian_filter(true, sigma=2, radius=2, order=0)
     return pred, true, res
 
 fnames = sorted(glob('../result/prediction_epoch70_aug5_native/*fits'))
@@ -54,15 +53,21 @@ err_cube = 2 * ((pred_cube) - (true_cube)) / (abs(pred_cube) + abs(true_cube))
 avg_err = np.mean(err_cube, axis=0)
 
 fig, axes = plt.subplots(figsize=(8,4))
-plt.subplot(1,2,1)
 plt.imshow(avg_err, vmin=-0.25, vmax=0.25)
 plt.title('Mean Relative Error (signed)')
 plt.colorbar()
 
+true_slice_sum = np.sum(true_cube, axis=(1,2))
+pred_slice_sum = np.sum(pred_cube, axis=(1,2))
+print(f'min true slice sum = {true_slice_sum.min()}')
+print(f'min pred slice sum = {pred_slice_sum.min()}')
+print(f'total true sum = {np.sum(true_slice_sum)}, avg = {np.sum(true_slice_sum)/N}')
+print(f'total pred sum = {np.sum(pred_slice_sum)}, avg = {np.sum(pred_slice_sum)/N}')
+
 # %%
 # Pixel intensity histogram
-_ = plt.hist(pred_cube.flatten(), 200, range=(-0.05,0.1), weights=np.ones(len(pred_cube.flatten()))/len(pred_cube.flatten()), alpha=0.7, label='pred distribution')
-_ = plt.hist(true_cube.flatten(), 200, range=(-0.05,0.1), weights=np.ones(len(pred_cube.flatten()))/len(pred_cube.flatten()), alpha=0.7, label='true distribution')
+_ = plt.hist(pred_cube.flatten(), 1000, range=(-0.05,0.1), weights=np.ones(len(pred_cube.flatten()))/len(pred_cube.flatten()), alpha=0.7, label='pred distribution')
+_ = plt.hist(true_cube.flatten(), 1000, range=(-0.05,0.1), weights=np.ones(len(pred_cube.flatten()))/len(pred_cube.flatten()), alpha=0.7, label='true distribution')
 plt.title('Histogram for 576-1 images')
 plt.xlabel('pixel intensity')
 plt.ylabel('probability density')
@@ -70,8 +75,8 @@ plt.legend()
 
 # %%
 # Pixel intensity histogram (cumulative)
-_ = plt.hist(pred_cube.flatten(), 200, range=(-0.05,0.1), density=True, cumulative=True, alpha=0.7, label='pred distribution')
-n, bins, _ = plt.hist(true_cube.flatten(), 200, range=(-0.05,0.1), density=True, cumulative=True, alpha=0.7, label='true distribution')
+_ = plt.hist(pred_cube.flatten(), 1000, range=(-0.05,0.1), density=True, cumulative=True, alpha=0.7, label='pred distribution')
+n, bins, _ = plt.hist(true_cube.flatten(), 1000, range=(-0.05,0.1), density=True, cumulative=True, alpha=0.7, label='true distribution')
 plt.title('Cumulative Histogram for 576-1 images')
 plt.xlabel('pixel intensity')
 plt.ylabel('probability density')
@@ -116,8 +121,16 @@ print('avg pixel err: high, mid, low =', np.array(tot_err)/512/512)
 # Single peak profile analysis
 subpred = pred_cube[0][195:225, 245:275]   # high peak
 subtrue = true_cube[0][195:225, 245:275]
-# subpred = pred_cube[0][160:200, 120:160]   # mid peak
-# subtrue = true_cube[0][160:200, 120:160]
+xx, yy = np.mgrid[0:subpred.shape[0], 0:subpred.shape[1]]
+fig, [ax1,ax2] = plt.subplots(1,2,subplot_kw={"projection": "3d"}, figsize=(16,12))
+ax1.set_zlim(subtrue.min(),subtrue.max())
+ax1.plot_surface(xx, yy, subpred, rstride=1, cstride=1, cmap='viridis', linewidth=0)
+ax2.plot_surface(xx, yy, subtrue, rstride=1, cstride=1, cmap='viridis', linewidth=0)
+ax1.set_title('Prediction')
+ax2.set_title('True')
+
+subpred = pred_cube[0][160:200, 120:160]   # mid peak
+subtrue = true_cube[0][160:200, 120:160]
 xx, yy = np.mgrid[0:subpred.shape[0], 0:subpred.shape[1]]
 fig, [ax1,ax2] = plt.subplots(1,2,subplot_kw={"projection": "3d"}, figsize=(16,12))
 ax1.set_zlim(subtrue.min(),subtrue.max())
