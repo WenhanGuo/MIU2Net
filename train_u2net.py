@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 from my_dataset import ImageDataset
 from torch.utils.tensorboard import SummaryWriter
 
+import shutil
 import math
 import numpy as np
 from glob import glob1
@@ -68,7 +69,8 @@ def main(args):
                           T.ToTensor(), 
                           T.RandomHorizontalFlip(prob=0.5), 
                           T.RandomVerticalFlip(prob=0.5), 
-                          T.DiscreteRotation(angles=[0,90,180,270])
+                          T.DiscreteRotation(angles=[0,90,180,270]), 
+                          T.ContinuousRotation(degrees=30)
                           ]), 
                       gaus_noise=T.AddGaussianNoise(n_galaxy=args.n_galaxy)
                       )
@@ -96,9 +98,13 @@ def main(args):
     model.to(device=device)
     torch.cuda.empty_cache()
 
-    # setting loss function, optimizer, and scheduler
-    loss_fn = nn.HuberLoss(delta=args.delta)
+    # setting loss function
+    if args.loss_fn == 'MSE':
+        loss_fn = nn.MSELoss()
+    elif args.loss_fn == 'Huber':
+        loss_fn = nn.HuberLoss(delta=args.huber_delta)
     loss_fn = loss_fn.to(device)
+
     # setting gaussian blur parameters for gaus mode loss function; not used if args.loss_mode == native
     blur1 = GaussianBlur(kernel_size=5, sigma=(2.0, 3.0))
     blur2 = GaussianBlur(kernel_size=11, sigma=(2.0, 3.0))
@@ -108,6 +114,7 @@ def main(args):
     blur6 = GaussianBlur(kernel_size=151, sigma=(25.0, 30.0))
     blur_fns = [blur1, blur2, blur3, blur4, blur5, blur6]
 
+    # setting optimizer & lr scheduler
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=args.lr, 
                                   weight_decay=args.weight_decay)
     lr_scheduler = create_lr_scheduler(optimizer, len(train_loader), args.epochs,
@@ -117,9 +124,8 @@ def main(args):
     # use tensorboard to visualize computation
     writer = SummaryWriter("logs_train")
     # delete existing tensorboard logs
-    old_logs = glob1('./logs_train', '*')
-    for f in old_logs:
-        os.remove(os.path.join(os.getcwd(), 'logs_train', f))
+    shutil.rmtree('./logs_train')
+    os.mkdir('./logs_train')
 
     # begin training
     total_train_step = 0
@@ -139,14 +145,17 @@ def main(args):
             with torch.cuda.amp.autocast(enabled=scaler is not None):
                 outputs = model(gamma)
                 loss_targ = loss_fn(outputs[0], kappa)
-                # native mode: Huber loss based on true kappa for every side output
+                # native mode: based on true kappa for every side output
                 if args.loss_mode == 'native':
                     losses = [loss_fn(outputs[j], kappa) for j in range(len(outputs))]
-                # gaus mode: Huber loss based on different levels of gaussian blurred kappa
+                # gaus mode: based on different levels of gaussian blurred kappa
                 elif args.loss_mode == 'gaus':
                     losses = [loss_fn(outputs[j+1], blur_fns[j](kappa)) for j in range(len(outputs)-1)]
                     losses.insert(0, loss_targ)
-
+                
+                # total loss = loss_fn loss + mass conservation loss for each side output
+                # mass_losses = [torch.abs(torch.sum(kappa) - torch.sum(outputs[m])) / 2e5 for m in range(len(outputs))]
+                # train_step_loss = sum(losses) + sum(mass_losses)
                 train_step_loss = sum(losses)
 
             # optimizer step
@@ -164,11 +173,16 @@ def main(args):
             total_train_step += 1
             # print 5 train losses per epoch
             if total_train_step % (len(train_loader) // 5) == 0:
+                # print(f"train step: {total_train_step}, \
+                #       total loss: {train_step_loss.item():.3}, \
+                #       targ loss: {losses[0].item():.3},\n \
+                #       side loss: {losses[1].item():.3},{losses[2].item():.3},{losses[3].item():.3},{losses[4].item():.3},{losses[5].item():.3},{losses[6].item():.3},\n \
+                #       mass loss: {mass_losses[1].item():.3},{mass_losses[2].item():.3},{mass_losses[3].item():.3},{mass_losses[4].item():.3},{mass_losses[5].item():.3},{mass_losses[6].item():.3}")
                 print(f"train step: {total_train_step}, \
                       total loss: {train_step_loss.item():.3}, \
                       targ loss: {losses[0].item():.3},\n \
                       side loss: {losses[1].item():.3},{losses[2].item():.3},{losses[3].item():.3},{losses[4].item():.3},{losses[5].item():.3},{losses[6].item():.3}")
-        
+
         # validation steps
         model.eval()
         with torch.no_grad():
@@ -189,9 +203,22 @@ def main(args):
                 print(f'1x1 conv weights = {last_w.round(3)}, bias = {last_b:.3}')
 
         # printing epoch stats & writing to tensorboard
-        print(f"epoch training loss = {train_step_loss}", f"LR = {curr_lr}")
-        print(f"avg validation loss = {val_loss/len(val_loader)}")
+        print(f"epoch training loss = {train_step_loss:.3}", f"LR = {curr_lr:.3}")
+        print(f"avg validation loss = {val_loss/len(val_loader):.4}")
         writer.add_scalar("train_loss", train_step_loss, global_step=i+1)
+        writer.add_scalar("targ_loss", losses[0].item(), global_step=i+1)
+        writer.add_scalars("side_losses", {'side1':losses[1].item(), 
+                                           'side2':losses[2].item(), 
+                                           'side3':losses[3].item(), 
+                                           'side4':losses[4].item(), 
+                                           'side5':losses[5].item(), 
+                                           'side6':losses[6].item()}, global_step=i+1)
+        # writer.add_scalars("mass_losses", {'sidem1':mass_losses[1].item(), 
+        #                                    'sidem2':mass_losses[2].item(), 
+        #                                    'sidem3':mass_losses[3].item(), 
+        #                                    'sidem4':mass_losses[4].item(), 
+        #                                    'sidem5':mass_losses[5].item(), 
+        #                                    'sidem6':mass_losses[6].item()}, global_step=i+1)
         writer.add_scalar("val_loss", val_loss/len(val_loader), global_step=i+1)
         writer.add_scalar("lr", curr_lr, global_step=i+1)
 
@@ -217,8 +244,9 @@ def get_args():
     parser.add_argument("-b", "--batch-size", default=64, type=int, help='batch size')
     parser.add_argument("--lr", default=1e-4, type=float, help='initial learning rate')
     parser.add_argument("--loss-mode", default='native', type=str, choices=['native', 'gaus'], help='loss function mode')
+    parser.add_argument("--loss-fn", default='Huber', type=str, choices=['MSE', 'Huber'], help='loss function: MSE or Huberloss')
+    parser.add_argument("--huber-delta", default=50, type=float, help='delta value for Huberloss')
     parser.add_argument("--weight-decay", default=1e-4, type=float, help='weight decay for AdamW optimizer')
-    parser.add_argument("--delta", default=0.01, type=float, help='delta value for Huber loss')
     parser.add_argument("--param-count", default=False, action='store_true', help='show model parameter count summary')
     
     return parser.parse_args()
