@@ -56,6 +56,17 @@ class DiscreteRotation(object):
         return image, target
 
 
+class ContinuousRotation(object):
+    def __init__(self, degrees):
+        self.degrees = degrees
+
+    def __call__(self, image, target):
+        angle = random.uniform(-self.degrees, self.degrees)
+        image = F.rotate(image, angle)
+        target = F.rotate(target, angle)
+        return image, target
+
+
 # add gaussian noise to shear
 class AddGaussianNoise(object):
     def __init__(self, n_galaxy, mean=0.):
