@@ -1,5 +1,6 @@
 import torch
 import transforms as T
+from torchvision.transforms import GaussianBlur
 from my_dataset import ImageDataset
 from torch.utils.data import DataLoader, Subset
 import os
@@ -27,7 +28,8 @@ def main(args):
                      transforms=T.Compose([
                          T.ToTensor()
                          ]), 
-                     gaus_noise=T.AddGaussianNoise(n_galaxy=args.n_galaxy)
+                     gaus_noise=T.AddGaussianNoise(n_galaxy=args.n_galaxy), 
+                     gaus_blur=GaussianBlur(kernel_size=5, sigma=2.0)
                      )
     test_data = ImageDataset(catalog=os.path.join(args.dir, 'test.csv'), **test_args)
     test_data = Subset(test_data, np.arange(args.num))

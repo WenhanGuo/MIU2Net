@@ -7,7 +7,7 @@ import astropy.io.fits as fits
 
 # Dataset class for our own data structure
 class ImageDataset(Dataset):
-    def __init__(self, catalog, data_dir, transforms=None, gaus_noise=None):
+    def __init__(self, catalog, data_dir, transforms=None, gaus_noise=None, gaus_blur=None):
         """
         catalog: name of .csv file containing image names to be read
         data_dir: path to data directory containing gamma1, gamma2, kappa folders
@@ -18,6 +18,7 @@ class ImageDataset(Dataset):
         self.data_dir = data_dir
         self.transforms = transforms
         self.gaus_noise = gaus_noise
+        self.gaus_blur = gaus_blur
     
     def __len__(self):
         return len(self.img_names)
@@ -43,6 +44,8 @@ class ImageDataset(Dataset):
             gamma, kappa = self.transforms(gamma, kappa)
         if self.gaus_noise:
             gamma = self.gaus_noise(gamma)
+        if self.gaus_blur:
+            gamma = self.gaus_blur(gamma)
         
         # gamma shape: torch.Size([2, 512, 512]); kappa shape: torch.Size([1, 512, 512])
         return gamma, kappa

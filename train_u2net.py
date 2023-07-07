@@ -72,13 +72,15 @@ def main(args):
                           T.DiscreteRotation(angles=[0,90,180,270]), 
                           T.ContinuousRotation(degrees=30)
                           ]), 
-                      gaus_noise=T.AddGaussianNoise(n_galaxy=args.n_galaxy)
+                      gaus_noise=T.AddGaussianNoise(n_galaxy=args.n_galaxy), 
+                      gaus_blur=GaussianBlur(kernel_size=5, sigma=2.0)
                       )
     valid_args = dict(data_dir=args.dir, 
                       transforms=T.Compose([
                           T.ToTensor()
                           ]), 
-                      gaus_noise=T.AddGaussianNoise(n_galaxy=args.n_galaxy)
+                      gaus_noise=T.AddGaussianNoise(n_galaxy=args.n_galaxy), 
+                      gaus_blur=GaussianBlur(kernel_size=5, sigma=2.0)
                       )
     train_data = ImageDataset(catalog=os.path.join(args.dir, 'train.csv'), **train_args)
     val_data = ImageDataset(catalog=os.path.join(args.dir, 'validation.csv'), **valid_args)
