@@ -23,13 +23,17 @@ def main(args):
     assert args.num <= len(test_cat)
     test_cat = test_cat[:args.num]
 
+    if args.gaus_blur == True:
+        shear_gb = GaussianBlur(kernel_size=5, sigma=2.0)
+    else:
+        shear_gb = None
     # load test dataset and dataloader
     test_args = dict(data_dir=args.dir, 
                      transforms=T.Compose([
                          T.ToTensor()
                          ]), 
                      gaus_noise=T.AddGaussianNoise(n_galaxy=args.n_galaxy), 
-                     gaus_blur=GaussianBlur(kernel_size=5, sigma=2.0)
+                     gaus_blur=shear_gb
                      )
     test_data = ImageDataset(catalog=os.path.join(args.dir, 'test.csv'), **test_args)
     test_data = Subset(test_data, np.arange(args.num))
@@ -62,6 +66,7 @@ def get_args():
     parser.add_argument("-g", "--n-galaxy", default=50, type=float, help='number of galaxies per arcmin (to determine noise level)')
     parser.add_argument("--num", default=32, type=int, help='number of test images to run')
     parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/data_new', type=str, help='data directory')
+    parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
     return parser.parse_args()
 
 

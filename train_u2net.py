@@ -14,7 +14,6 @@ from torch.utils.tensorboard import SummaryWriter
 import shutil
 import math
 import numpy as np
-from glob import glob1
 from prettytable import PrettyTable
 import datetime
 
@@ -64,6 +63,10 @@ def create_lr_scheduler(optimizer,
 def main(args):
 
     # prepare train and validation datasets; augment data with flip & rotations; add noise
+    if args.gaus_blur == True:
+        shear_gb = GaussianBlur(kernel_size=5, sigma=2.0)
+    else:
+        shear_gb = None
     train_args = dict(data_dir=args.dir, 
                       transforms=T.Compose([
                           T.ToTensor(), 
@@ -73,14 +76,14 @@ def main(args):
                           T.ContinuousRotation(degrees=30)
                           ]), 
                       gaus_noise=T.AddGaussianNoise(n_galaxy=args.n_galaxy), 
-                      gaus_blur=GaussianBlur(kernel_size=5, sigma=2.0)
+                      gaus_blur=shear_gb
                       )
     valid_args = dict(data_dir=args.dir, 
                       transforms=T.Compose([
                           T.ToTensor()
                           ]), 
                       gaus_noise=T.AddGaussianNoise(n_galaxy=args.n_galaxy), 
-                      gaus_blur=GaussianBlur(kernel_size=5, sigma=2.0)
+                      gaus_blur=shear_gb
                       )
     train_data = ImageDataset(catalog=os.path.join(args.dir, 'train.csv'), **train_args)
     val_data = ImageDataset(catalog=os.path.join(args.dir, 'validation.csv'), **valid_args)
@@ -245,6 +248,7 @@ def get_args():
     parser.add_argument("-e", "--epochs", default=64, type=int, help='number of total epochs to train')
     parser.add_argument("-b", "--batch-size", default=64, type=int, help='batch size')
     parser.add_argument("--lr", default=1e-4, type=float, help='initial learning rate')
+    parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
     parser.add_argument("--loss-mode", default='native', type=str, choices=['native', 'gaus'], help='loss function mode')
     parser.add_argument("--loss-fn", default='Huber', type=str, choices=['MSE', 'Huber'], help='loss function: MSE or Huberloss')
     parser.add_argument("--huber-delta", default=50, type=float, help='delta value for Huberloss')
