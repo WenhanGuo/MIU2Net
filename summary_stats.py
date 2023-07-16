@@ -8,27 +8,45 @@ from skimage.feature import peak_local_max
 from scipy.spatial import KDTree
 
 
-def read_fits(name):
-    with fits.open(name, memmap=False) as f:
+def read_prediction(fname, blur=False):
+    with fits.open(fname, memmap=False) as f:
         pred = f[0].data
         true = f[1].data
         res = f[2].data
-        pred = ndimage.gaussian_filter(pred, sigma=2, radius=2, order=0)
-        true = ndimage.gaussian_filter(true, sigma=2, radius=2, order=0)
+        if blur == True:
+            pred = ndimage.gaussian_filter(pred, sigma=2, radius=2, order=0)
+            true = ndimage.gaussian_filter(true, sigma=2, radius=2, order=0)
     return pred, true, res
 
-fnames = sorted(glob('../result/prediction_epoch70_aug5_native/*fits'))
-# fnames = sorted(glob('../result/prediction_epoch51_aug3_native/*fits'))
-N = len(fnames)
-avg_err = np.zeros((512,512))
-pred_cube, true_cube = [], []
+def read_folder(glob_cmd, blur=False):
+    fnames = sorted(glob(glob_cmd))
+    N = len(fnames)
+    pred_cube, true_cube = [], []
 
-for i in range(N):
-    name = fnames[i]
-    pred, true, res = read_fits(name)
-    pred_cube.append(pred)
-    true_cube.append(true)
-pred_cube, true_cube = np.array(pred_cube), np.array(true_cube)
+    for i in range(N):
+        fname = fnames[i]
+        pred, true, res = read_prediction(fname, blur=blur)
+        pred_cube.append(pred)
+        true_cube.append(true)
+    
+    return np.array(pred_cube), np.array(true_cube)
+
+def read_ks(glob_ks, glob_true, blur=False):
+    ks_names = sorted(glob(glob_ks))
+    true_names = sorted(glob(glob_true))
+    N = len(ks_names)
+    pred_cube, true_cube = [], []
+
+    for i in range(N):
+        pred = fits.getdata(ks_names[i])
+        true = fits.getdata(true_names[i])
+        if blur == True:
+            pred = ndimage.gaussian_filter(pred, sigma=3, radius=3, order=0)
+            true = ndimage.gaussian_filter(true, sigma=3, radius=3, order=0)
+        pred_cube.append(pred)
+        true_cube.append(true)
+    
+    return np.array(pred_cube), np.array(true_cube)
 
 def draw(plot_id, data, title, scale=[-0.02, 0.05], cmap=plt.cm.jet, fontsize=18):
     plt.subplot(2, 2, plot_id)
@@ -42,12 +60,14 @@ def cbar(cax):
     fig.subplots_adjust(right=0.87)
     plt.colorbar(cax=cax, orientation="vertical")
 
+
+# pred_cube, true_cube = read_folder(glob_cmd='../result/fig_faug14_bshear_highhuber/*fits', blur=True)
+pred_cube, true_cube = read_ks(glob_ks='/Users/danny/Desktop/WL/data_new/kappa_ks/*fits', 
+                               glob_true='/Users/danny/Desktop/WL/data_new/kappa/*[2][4][0-9][0-9][0-9].fits', 
+                               blur=False)
+
 # %%
 # Whole-field mean relative error
-pred_cube = np.delete(pred_cube, [50], axis=0)
-true_cube = np.delete(true_cube, [50], axis=0)
-# pred_cube = np.delete(pred_cube, [222, 226, 254, 392], axis=0)
-# true_cube = np.delete(true_cube, [222, 226, 254, 392], axis=0)
 N = len(pred_cube)
 err_cube = 2 * ((pred_cube) - (true_cube)) / (abs(pred_cube) + abs(true_cube))
 avg_err = np.mean(err_cube, axis=0)
@@ -180,5 +200,35 @@ plt.legend()
 print(f'avg abs err per peak = {sum(abs_err)/npeaks:.3f}')
 print(f'avg rel err per peak = {sum(rel_err)/npeaks:.3f}')
 print(f'avg number of peaks per image = {npeaks/N:.2f}')
+
+# %%
+import seaborn as sns
+sns.set()
+
+fpred = sorted(pred_cube[5].flatten())
+ftrue = sorted(true_cube[5].flatten())
+stack = np.stack((fpred, ftrue), axis=1)
+
+fig, ax = plt.subplots()
+plt.plot(stack[:, 0], stack[:, 1])
+plt.xlim(min(ftrue)-0.05, max(ftrue)+0.05)
+plt.ylim(min(ftrue)-0.05, max(ftrue)+0.05)
+plt.xlabel('predicted pixel intensity')
+plt.ylabel('true pixel intensity')
+ax.set_aspect('equal', adjustable='box')
+
+# %%
+fig, ax = plt.subplots(figsize=(8,8))
+plt.xlim(-0.05, 1)
+plt.ylim(-0.05, 1)
+plt.xlabel('predicted pixel intensity')
+plt.ylabel('true pixel intensity')
+ax.set_aspect('equal', adjustable='box')
+
+for i in range(50):
+    fpred = sorted(pred_cube[i].flatten())
+    ftrue = sorted(true_cube[i].flatten())
+    stack = np.stack((fpred, ftrue), axis=1)
+    plt.plot(stack[:, 0], stack[:, 1])
 
 # %%
