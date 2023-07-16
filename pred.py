@@ -30,9 +30,10 @@ def main(args):
     # load test dataset and dataloader
     test_args = dict(data_dir=args.dir, 
                      transforms=T.Compose([
-                         T.ToTensor()
+                         T.ToTensor(), 
+                         T.AddGaussianNoise(n_galaxy=args.n_galaxy), 
+                         T.KS_rec(activate=args.ks)
                          ]), 
-                     gaus_noise=T.AddGaussianNoise(n_galaxy=args.n_galaxy), 
                      gaus_blur=shear_gb
                      )
     test_data = ImageDataset(catalog=os.path.join(args.dir, 'test.csv'), **test_args)
@@ -67,6 +68,7 @@ def get_args():
     parser.add_argument("--num", default=32, type=int, help='number of test images to run')
     parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/data_new', type=str, help='data directory')
     parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
+    parser.add_argument("--ks", default=False, action='store_true', help='predict kappa using KS deconvolution and make this an extra channel')
     return parser.parse_args()
 
 

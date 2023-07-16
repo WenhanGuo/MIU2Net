@@ -1,3 +1,4 @@
+import torch
 from torch.utils.data import Dataset
 import os
 import numpy as np
@@ -7,7 +8,7 @@ import astropy.io.fits as fits
 
 # Dataset class for our own data structure
 class ImageDataset(Dataset):
-    def __init__(self, catalog, data_dir, transforms=None, gaus_noise=None, gaus_blur=None):
+    def __init__(self, catalog, data_dir, transforms=None, gaus_blur=None):
         """
         catalog: name of .csv file containing image names to be read
         data_dir: path to data directory containing gamma1, gamma2, kappa folders
@@ -17,7 +18,6 @@ class ImageDataset(Dataset):
         self.img_names = pd.read_csv(catalog)
         self.data_dir = data_dir
         self.transforms = transforms
-        self.gaus_noise = gaus_noise
         self.gaus_blur = gaus_blur
     
     def __len__(self):
@@ -42,10 +42,9 @@ class ImageDataset(Dataset):
         # apply transforms
         if self.transforms:
             gamma, kappa = self.transforms(gamma, kappa)
-        if self.gaus_noise:
-            gamma = self.gaus_noise(gamma)
         if self.gaus_blur:
             gamma = self.gaus_blur(gamma)
         
-        # gamma shape: torch.Size([2, 512, 512]); kappa shape: torch.Size([1, 512, 512])
+        # gamma shape = torch.Size([2, 512, 512]); kappa shape = torch.Size([1, 512, 512])
+        # if ks: gamma shape = torch.Size([3, 512, 512]); last channel is ks map
         return gamma, kappa

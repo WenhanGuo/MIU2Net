@@ -169,10 +169,10 @@ class U2Net(nn.Module):
             return x
 
 
-def u2net_full(out_ch: int = 1):
+def u2net_full(out_ch: int = 1, in_ch: int = 2):
     cfg = {
         # height, in_ch, mid_ch, out_ch, RSU4F, side
-        "encode": [[7, 2, 32, 64, False, False],      # En1
+        "encode": [[7, in_ch, 32, 64, False, False],      # En1
                    [6, 64, 32, 128, False, False],    # En2
                    [5, 128, 64, 256, False, False],   # En3
                    [4, 256, 128, 512, False, False],  # En4
@@ -187,46 +187,3 @@ def u2net_full(out_ch: int = 1):
     }
 
     return U2Net(cfg, out_ch)
-
-
-def u2net_lite(out_ch: int = 1):
-    cfg = {
-        # height, in_ch, mid_ch, out_ch, RSU4F, side
-        "encode": [[7, 2, 16, 64, False, False],  # En1
-                   [6, 64, 16, 64, False, False],  # En2
-                   [5, 64, 16, 64, False, False],  # En3
-                   [4, 64, 16, 64, False, False],  # En4
-                   [4, 64, 16, 64, True, False],  # En5
-                   [4, 64, 16, 64, True, True]],  # En6
-        # height, in_ch, mid_ch, out_ch, RSU4F, side
-        "decode": [[4, 128, 16, 64, True, True],  # De5
-                   [4, 128, 16, 64, False, True],  # De4
-                   [5, 128, 16, 64, False, True],  # De3
-                   [6, 128, 16, 64, False, True],  # De2
-                   [7, 128, 16, 64, False, True]]  # De1
-    }
-
-    return U2Net(cfg, out_ch)
-
-
-# def convert_onnx(m, save_path):
-#     m.eval()
-#     x = torch.rand(1, 3, 288, 288, requires_grad=True)
-
-#     # export the model
-#     torch.onnx.export(m,  # model being run
-#                       x,  # model input (or a tuple for multiple inputs)
-#                       save_path,  # where to save the model (can be a file or file-like object)
-#                       export_params=True,
-#                       opset_version=11)
-
-
-if __name__ == '__main__':
-    # n_m = RSU(height=7, in_ch=3, mid_ch=12, out_ch=3)
-    # convert_onnx(n_m, "RSU7.onnx")
-    #
-    # n_m = RSU4F(in_ch=3, mid_ch=12, out_ch=3)
-    # convert_onnx(n_m, "RSU4F.onnx")
-
-    u2net = u2net_full()
-    # convert_onnx(u2net, "u2net_full.onnx")

@@ -67,22 +67,25 @@ def main(args):
         shear_gb = GaussianBlur(kernel_size=5, sigma=2.0)
     else:
         shear_gb = None
+
     train_args = dict(data_dir=args.dir, 
                       transforms=T.Compose([
                           T.ToTensor(), 
+                          T.AddGaussianNoise(n_galaxy=args.n_galaxy), 
+                          T.KS_rec(activate=args.ks), 
                           T.RandomHorizontalFlip(prob=0.5), 
                           T.RandomVerticalFlip(prob=0.5), 
                           T.DiscreteRotation(angles=[0,90,180,270]), 
                           T.ContinuousRotation(degrees=30)
                           ]), 
-                      gaus_noise=T.AddGaussianNoise(n_galaxy=args.n_galaxy), 
                       gaus_blur=shear_gb
                       )
     valid_args = dict(data_dir=args.dir, 
                       transforms=T.Compose([
-                          T.ToTensor()
+                          T.ToTensor(), 
+                          T.AddGaussianNoise(n_galaxy=args.n_galaxy), 
+                          T.KS_rec(activate=args.ks), 
                           ]), 
-                      gaus_noise=T.AddGaussianNoise(n_galaxy=args.n_galaxy), 
                       gaus_blur=shear_gb
                       )
     train_data = ImageDataset(catalog=os.path.join(args.dir, 'train.csv'), **train_args)
@@ -93,14 +96,13 @@ def main(args):
     val_loader = DataLoader(val_data, shuffle=True, drop_last=True, **loader_args)
 
     # initialize UNet model
-    model = u2net_full()
-    model = model.to(memory_format=torch.channels_last)
+    model = u2net_full(in_ch=3) if args.ks == True else u2net_full(in_ch=2)
     if args.param_count == True:
         count_parameters(model)
     # data parallel training on multiple GPUs (restrained by cuda visible devices)
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
-    model.to(device=device)
+    model.to(device, memory_format=torch.channels_last)
     torch.cuda.empty_cache()
 
     # setting loss function
@@ -249,10 +251,11 @@ def get_args():
     parser.add_argument("-b", "--batch-size", default=64, type=int, help='batch size')
     parser.add_argument("--lr", default=1e-4, type=float, help='initial learning rate')
     parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
+    parser.add_argument("--ks", default=False, action='store_true', help='predict kappa using KS deconvolution and make this an extra channel')
     parser.add_argument("--loss-mode", default='native', type=str, choices=['native', 'gaus'], help='loss function mode')
     parser.add_argument("--loss-fn", default='Huber', type=str, choices=['MSE', 'Huber'], help='loss function: MSE or Huberloss')
     parser.add_argument("--huber-delta", default=50, type=float, help='delta value for Huberloss')
-    parser.add_argument("--weight-decay", default=1e-4, type=float, help='weight decay for AdamW optimizer')
+    parser.add_argument("--weight-decay", default=1e-2, type=float, help='weight decay for AdamW optimizer')
     parser.add_argument("--param-count", default=False, action='store_true', help='show model parameter count summary')
     
     return parser.parse_args()
