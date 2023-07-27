@@ -64,7 +64,33 @@ def cbar(cax):
 # pred_cube, true_cube = read_folder(glob_cmd='../result/fig_faug14_bshear_highhuber/*fits', blur=True)
 pred_cube, true_cube = read_ks(glob_ks='/Users/danny/Desktop/WL/data_new/kappa_ks/*fits', 
                                glob_true='/Users/danny/Desktop/WL/data_new/kappa/*[2][4][0-9][0-9][0-9].fits', 
-                               blur=False)
+                               blur=True)
+
+# %%
+# only for evaluating KS method
+pred = pred_cube[6]
+true = true_cube[6]
+bpred = ndimage.gaussian_filter(pred, sigma=3, radius=3, order=0)
+btrue = ndimage.gaussian_filter(true, sigma=3, radius=3, order=0)
+
+fig, axes = plt.subplots(figsize=(8,8))
+draw(1, pred, 'KS prediction', scale=[-0.05, 0.2])
+draw(2, true, 'true kappa', scale=[-0.05, 0.2])
+draw(3, ndimage.gaussian_filter(pred, sigma=3, radius=3, order=0), 'KS blurred', scale=[-0.05, 0.2])
+draw(4, ndimage.gaussian_filter(true, sigma=3, radius=3, order=0), 'true blurred', scale=[-0.05, 0.2])
+cbar(cax=plt.axes([0.88, 0.08, 0.04, 0.8]))
+
+# %%
+# only for evaluating KS method
+subpred = bpred[280:330, 250:300]
+subtrue = btrue[280:330, 250:300]
+xx, yy = np.mgrid[0:subpred.shape[0], 0:subpred.shape[1]]
+fig, [ax1,ax2] = plt.subplots(1,2,subplot_kw={"projection": "3d"}, figsize=(16,12))
+ax1.set_zlim(subtrue.min(),subtrue.max())
+ax1.plot_surface(xx, yy, subpred, rstride=1, cstride=1, cmap='viridis', linewidth=0)
+ax2.plot_surface(xx, yy, subtrue, rstride=1, cstride=1, cmap='viridis', linewidth=0)
+ax1.set_title('Prediction')
+ax2.set_title('True')
 
 # %%
 # Whole-field mean relative error
@@ -205,8 +231,8 @@ print(f'avg number of peaks per image = {npeaks/N:.2f}')
 import seaborn as sns
 sns.set()
 
-fpred = sorted(pred_cube[5].flatten())
-ftrue = sorted(true_cube[5].flatten())
+fpred = sorted(pred_cube[1].flatten())
+ftrue = sorted(true_cube[1].flatten())
 stack = np.stack((fpred, ftrue), axis=1)
 
 fig, ax = plt.subplots()
