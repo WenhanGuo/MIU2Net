@@ -244,8 +244,8 @@ class HaloMap3D(object):
     nslice : int
         number of redshift slices
 
-    z_list : arr of np.float64
-        array of z values for each redshift slice; len(z_list) = nslice
+    z_list : astropy.units.quantity.Quantity arr
+        Quantity array of z values for each z slice (unit = cu.redshift); len(z_list) = nslice
 
     d_list : arr of np.float64
         array of physical distances (scalars; implied unit = Mpc) for each redshift slice
@@ -292,9 +292,9 @@ class HaloMap3D(object):
     def __init__(self, halo_cat: pd.DataFrame, z_list: np.ndarray) -> None:
         self.name = str(halo_cat.name)
         self.nslice = 37
-        self.z_list = z_list
+        self.z_list = z_list * cu.redshift
         assert self.nslice == len(z_list)
-        d_list = z_list.to(u.Mpc, cu.with_redshift(WMAP9)).value
+        d_list = self.z_list.to(u.Mpc, cu.with_redshift(WMAP9)).value
         self.d_list = np.array(d_list)
         self.pixel_scale = (3.5*u.deg / 1024).to(u.rad).value
         self.pix2mpc_list = self.d_list * self.pixel_scale
