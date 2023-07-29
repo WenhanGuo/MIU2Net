@@ -1,9 +1,8 @@
 from halo_nfw_model import HaloMap3D
 import os
-from multiprocessing import Process
+import multiprocessing
 import pandas as pd
 from glob import glob1
-import astropy.cosmology.units as cu
 import astropy.io.fits as fits
 
 
@@ -26,6 +25,7 @@ def get_args():
     parser.add_argument("--out-dir", default='/share/lirui/Wenhan/WL/halo_map', type=str, help='directory to which output FITS cubes should save')
     parser.add_argument("--zcat-path", default='./redshift_info.txt', type=str, help='full path to redshift_info.txt')
     parser.add_argument("--num", default=6144, type=int, help='number of catalog .txt files to convert to FITS cube')
+    parser.add_argument("--cpu", default=64, type=int, help='number of cpu cores to use for multiprocessing')
     parser.add_argument("--map-type", default='Sigma', type=str, choices=['rho', 'Sigma'], help='map rho (density) or Sigma (projected surface density)')
 
     return parser.parse_args()
@@ -35,13 +35,10 @@ if __name__ == '__main__':
     args = get_args()
     halo_cats = sorted(glob1(args.cat_dir, '*area[0-9].txt'))[:args.num]
     redshift_cat = pd.read_csv(args.zcat_path, sep=' ')
-    args.z_list = list(redshift_cat['z_lens']) * cu.redshift
+    args.z_list = list(redshift_cat['z_lens'])
 
-    processes = []
+    pool = multiprocessing.Pool(processes=args.cpu)
     for cat_name in halo_cats:
-        p = Process(target=multiprocess_wrapper, args=(args, cat_name))
-        processes.append(p)
-        p.start()
-
-    for process in processes:
-        process.join()
+        pool.apply_async(func=multiprocess_wrapper, args=(args, cat_name))
+    pool.close()
+    pool.join()
