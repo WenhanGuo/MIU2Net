@@ -18,7 +18,7 @@ def draw(plot_id, data, title, scale=[-2, 5], cmap=plt.cm.jet, fontsize=18):
     plt.yticks([])
 
 
-fnames = sorted(glob('./result/prediction/*fits'))
+fnames = sorted(glob('../result/prediction/*fits'))
 
 for i in range(len(fnames)):
     name = fnames[i]
@@ -37,7 +37,7 @@ for i in range(len(fnames)):
     plt.colorbar(cax=cax, orientation="vertical")
 
     name = name.split('/')[-1]
-    save_dir = './result/fig/' + name + '.png'
+    save_dir = '../result/fig/' + name + '.png'
     plt.savefig(save_dir)
     print(f"saved figure {i+1}: {name}")
     plt.close()

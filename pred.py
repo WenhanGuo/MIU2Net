@@ -56,7 +56,7 @@ def main(args):
             y_true = np.float32(kappa[0][0].cpu())
             res = y_true - y_pred
             map_name = test_cat['kappa'][test_step]
-            map_path = os.path.join('./result/prediction', map_name)
+            map_path = os.path.join('../result/prediction', map_name)
             save_img(y_pred, y_true, res, map_path)
             test_step += 1
 

@@ -25,7 +25,7 @@ def count_parameters(model):
         if not parameter.requires_grad: continue
         params = parameter.numel()
         table.add_row([name, params])
-        total_params+=params
+        total_params += params
     print(table)
     print(f"Total Trainable Params: {total_params}")
     return total_params
@@ -160,9 +160,6 @@ def main(args):
                     losses = [loss_fn(outputs[j+1], blur_fns[j](kappa)) for j in range(len(outputs)-1)]
                     losses.insert(0, loss_targ)
                 
-                # total loss = loss_fn loss + mass conservation loss for each side output
-                # mass_losses = [torch.abs(torch.sum(kappa) - torch.sum(outputs[m])) / 2e5 for m in range(len(outputs))]
-                # train_step_loss = sum(losses) + sum(mass_losses)
                 train_step_loss = sum(losses)
 
             # optimizer step
@@ -180,11 +177,6 @@ def main(args):
             total_train_step += 1
             # print 5 train losses per epoch
             if total_train_step % (len(train_loader) // 5) == 0:
-                # print(f"train step: {total_train_step}, \
-                #       total loss: {train_step_loss.item():.3}, \
-                #       targ loss: {losses[0].item():.3},\n \
-                #       side loss: {losses[1].item():.3},{losses[2].item():.3},{losses[3].item():.3},{losses[4].item():.3},{losses[5].item():.3},{losses[6].item():.3},\n \
-                #       mass loss: {mass_losses[1].item():.3},{mass_losses[2].item():.3},{mass_losses[3].item():.3},{mass_losses[4].item():.3},{mass_losses[5].item():.3},{mass_losses[6].item():.3}")
                 print(f"train step: {total_train_step}, \
                       total loss: {train_step_loss.item():.3}, \
                       targ loss: {losses[0].item():.3},\n \
@@ -220,12 +212,6 @@ def main(args):
                                            'side4':losses[4].item(), 
                                            'side5':losses[5].item(), 
                                            'side6':losses[6].item()}, global_step=i+1)
-        # writer.add_scalars("mass_losses", {'sidem1':mass_losses[1].item(), 
-        #                                    'sidem2':mass_losses[2].item(), 
-        #                                    'sidem3':mass_losses[3].item(), 
-        #                                    'sidem4':mass_losses[4].item(), 
-        #                                    'sidem5':mass_losses[5].item(), 
-        #                                    'sidem6':mass_losses[6].item()}, global_step=i+1)
         writer.add_scalar("val_loss", val_loss/len(val_loader), global_step=i+1)
         writer.add_scalar("lr", curr_lr, global_step=i+1)
 
