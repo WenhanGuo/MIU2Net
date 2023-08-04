@@ -21,8 +21,8 @@ def multiprocess_wrapper(args, cat_name):
 def get_args():
     import argparse
     parser = argparse.ArgumentParser(description='Convert halo catalog to halo NFW profile FITS cubes')
-    parser.add_argument("--cat-dir", default='/share/lirui/Wenhan/WL/halo_cat', type=str, help='directory where all halo catalog .txt files are')
-    parser.add_argument("--out-dir", default='/share/lirui/Wenhan/WL/halo_map', type=str, help='directory to which output FITS cubes should save')
+    parser.add_argument("--cat-dir", default='/ksmap/ks/halocat', type=str, help='directory where all halo catalog .txt files are')
+    parser.add_argument("--out-dir", default='/ksmap/ks/halomap', type=str, help='directory to which output FITS cubes should save')
     parser.add_argument("--zcat-path", default='./redshift_info.txt', type=str, help='full path to redshift_info.txt')
     parser.add_argument("--num", default=6144, type=int, help='number of catalog .txt files to convert to FITS cube')
     parser.add_argument("--cpu", default=64, type=int, help='number of cpu cores to use for multiprocessing')
@@ -37,8 +37,6 @@ if __name__ == '__main__':
     redshift_cat = pd.read_csv(args.zcat_path, sep=' ')
     args.z_list = list(redshift_cat['z_lens'])
 
-    pool = multiprocessing.Pool(processes=args.cpu)
-    for cat_name in halo_cats:
-        pool.apply_async(func=multiprocess_wrapper, args=(args, cat_name))
-    pool.close()
-    pool.join()
+    with multiprocessing.Pool(processes=args.cpu) as pool:
+        arguments = [(args, cat_name) for cat_name in halo_cats]
+        pool.starmap(func=multiprocess_wrapper, iterable=arguments, chunksize=10)
