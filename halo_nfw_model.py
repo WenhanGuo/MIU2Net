@@ -249,6 +249,9 @@ class HaloMap3D(object):
 
     d_list : arr of np.float64
         array of physical distances (scalars; implied unit = Mpc) for each redshift slice
+    
+    arcmin2mpc : arr of np.float64
+        array of physical distances an arcmin spans (scalars; implied unit = Mpc) for each z
 
     pixel_scale : np.float64
         how many radians does one side of pixel span (scalar; implied unit = rad)
@@ -296,6 +299,7 @@ class HaloMap3D(object):
         assert self.nslice == len(z_list)
         d_list = self.z_list.to(u.Mpc, cu.with_redshift(WMAP9)).value
         self.d_list = np.array(d_list)
+        self.arcmin2mpc = (1/60/180*np.pi) * self.d_list
         self.pixel_scale = (3.5*u.deg / 1024).to(u.rad).value
         self.pix2mpc_list = self.d_list * self.pixel_scale
 
@@ -359,7 +363,10 @@ class HaloMap3D(object):
             elif map_type == 'Sigma':
                 xy += halo.call_BMO_surface_mass_density(r=comoving_dis)
 
-        return xy
+        if map_type == 'rho':
+            return xy * (self.arcmin2mpc[z_idx]*1000)**3   # M☉/kpc^3 --> M☉/arcmin^3
+        elif map_type == 'Sigma':
+            return xy * (self.arcmin2mpc[z_idx]*1000)**2   # M☉/kpc^2 --> M☉/arcmin^2
     
     def map_all(self, map_type: str = 'Sigma') -> None:
         """Map 3D data on all 37 z_idx z slices."""
