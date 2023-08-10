@@ -1,5 +1,6 @@
 import torch
 from torchvision.transforms import functional as F
+from torchvision.transforms import transforms as T
 import random
 import numpy as np
 from typing import Sequence
@@ -17,10 +18,18 @@ class Compose(object):
 
 
 class ToTensor(object):
-    def __call__(self, image, target):
-        image = F.to_tensor(image)
-        target = F.to_tensor(target)
-        return image, target
+    def __call__(self, image):
+        image = F.to_tensor(np.transpose(image, (1, 2, 0)))
+        return image
+
+
+class Normalize(object):
+    def __init__(self, mean, std):
+        self.mean = mean
+        self.std = std
+    def __call__(self, image):
+        image = F.normalize(image, mean=self.mean, std=self.std)
+        return image
 
 
 class RandomHorizontalFlip(object):
@@ -67,6 +76,17 @@ class ContinuousRotation(object):
         return image, target
 
 
+class RandomCrop(object):
+    def __init__(self, size: int):
+        self.size = size
+
+    def __call__(self, image, target):
+        crop_params = T.RandomCrop.get_params(image, (self.size, self.size))
+        image = F.crop(image, *crop_params)
+        target = F.crop(target, *crop_params)
+        return image, target
+
+
 # add gaussian noise to shear
 class AddGaussianNoise(object):
     def __init__(self, n_galaxy, mean=0.):
@@ -78,13 +98,13 @@ class AddGaussianNoise(object):
         self.n_galaxy = n_galaxy
         self.mean = mean
 
-    def __call__(self, image, target):
+    def __call__(self, image):
         sigma_e = 0.4   # rms amplitude of the intrinsic ellipticity distribution
         theta_G = 0.205   # pixel side length in arcmin (gaussian smoothing window)
         variance = (sigma_e**2 / 2) / (theta_G**2 * self.n_galaxy)
         std = np.sqrt(variance)
         image = image + torch.randn(image.size()) * std + self.mean
-        return image, target
+        return image
         # for 50 galaxies per pix, std = 0.1951; 
         # for 20 galaxies per pix, std = 0.3085
 
