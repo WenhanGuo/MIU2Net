@@ -16,12 +16,14 @@ def glob_data(directory, zlist):
             arr = np.vstack([arr, fnames])
     return arr
 
-zlist = [8, 15, 22, 29, 37]
+zlist = np.arange(1, 38)
 t = Table()
-t['gamma1'] = glob_data('../data_3d/gamma1', zlist=zlist).transpose()
-t['gamma2'] = glob_data('../data_3d/gamma2', zlist=zlist).transpose()
-t['kappa'] = glob_data('../data_3d/kappa', zlist=zlist).transpose()
+t['gamma1'] = sorted(glob('/share/lirui/Wenhan/WL/gamma1_cube/*.fits'))[0:2000]
+t['gamma2'] = sorted(glob('/share/lirui/Wenhan/WL/gamma2_cube/*.fits'))[0:2000]
+# t['kappa'] = glob_data('/ksmap/map/kappa', zlist=zlist)
+t['halo'] = sorted(glob('/share/lirui/Wenhan/WL/halomap/*.fits'))[0:2000]
+t['density'] = sorted(glob('/share/lirui/Wenhan/WL/density/*.mat'))[0:2000]
 
-t[0:2500].write('../data_3d/train.ecsv', overwrite=True)
-t[2500:3000].write('../data_3d/validation.ecsv', overwrite=True)
-t[3000:3072].write('../data_3d/test.ecsv', overwrite=True)
+t[0:1800].write('/share/lirui/Wenhan/WL/train.ecsv', overwrite=True)
+t[1800:2000].write('/share/lirui/Wenhan/WL/validation.ecsv', overwrite=True)
+t[6000:6144].write('/share/lirui/Wenhan/WL/test.ecsv', overwrite=True)
