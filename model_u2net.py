@@ -133,6 +133,12 @@ class U2Net(nn.Module):
         self.decode_modules = nn.ModuleList(decode_list)
         self.side_modules = nn.ModuleList(side_list)
         self.out_conv = nn.Conv2d(self.encode_num * out_ch, out_ch, kernel_size=1)
+        init_1x1_w = torch.zeros([1, 6, 1, 1])
+        torch.nn.init.constant_(init_1x1_w, val=1/6)
+        init_1x1_b = torch.tensor([0.])
+        with torch.no_grad():
+            self.out_conv.weight = torch.nn.Parameter(init_1x1_w)
+            self.out_conv.bias = torch.nn.Parameter(init_1x1_b)
 
     def forward(self, x: torch.Tensor) -> Union[torch.Tensor, List[torch.Tensor]]:
         _, _, h, w = x.shape
