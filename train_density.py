@@ -1,6 +1,6 @@
 #! -*- coding: utf-8 -*-
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '4'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 from model_u2net import u2net_full
 import torch
@@ -68,9 +68,10 @@ def main(args):
     else:
         target_gb = None
     train_data = ImageDataset(catalog=os.path.join(args.dir, 'train.ecsv'), 
+                              z_cat=args.zcat, 
                               n_galaxy=args.n_galaxy, 
                               lens_zslices=[10], 
-                              src_zslices=[10], 
+                              src_zslices=[15], 
                               transforms=T.Compose([
                                 #   T.ToTensor(), 
                                   T.KS_rec(activate=args.ks), 
@@ -81,9 +82,10 @@ def main(args):
                               ]), 
                               gaus_blur=target_gb)
     val_data = ImageDataset(catalog=os.path.join(args.dir, 'validation.ecsv'), 
+                            z_cat=args.zcat, 
                             n_galaxy=args.n_galaxy, 
                             lens_zslices=[10], 
-                            src_zslices=[10], 
+                            src_zslices=[15], 
                             transforms=T.Compose([
                                 # T.ToTensor(), 
                                 T.KS_rec(activate=args.ks), 
@@ -91,19 +93,21 @@ def main(args):
                             ]), 
                             gaus_blur=target_gb)
     # prepare train and validation dataloaders
-    loader_args = dict(batch_size=args.batch_size, num_workers=8, pin_memory=True)
+    loader_args = dict(batch_size=args.batch_size, num_workers=2, pin_memory=True)
     train_loader = DataLoader(train_data, shuffle=True, **loader_args)
     val_loader = DataLoader(val_data, shuffle=True, drop_last=True, **loader_args)
     print('loader initialized.')
 
     # initialize UNet model
-    model = u2net_full(in_ch=4) if args.ks == True else u2net_full(in_ch=3)
+    in_channels = int(sum([args.shear*2, args.kappa, args.ks])) + 1
+    print('in_channels =', in_channels)
+    model = u2net_full(in_ch=in_channels)
+
     if args.param_count == True:
         count_parameters(model)
     # data parallel training on multiple GPUs (restrained by cuda visible devices)
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
-    # model.to(device)
     model.to(device, memory_format=torch.channels_last)
     torch.cuda.empty_cache()
 
@@ -239,17 +243,20 @@ def main(args):
 def get_args():
     import argparse
     parser = argparse.ArgumentParser(description='Train U2Net')
-    parser.add_argument("--dir", default='/share/lirui/Wenhan/WL', type=str, help='data directory')
+    parser.add_argument("--dir", default='/ksmap', type=str, help='data directory')
+    parser.add_argument("--zcat", default='/share/lirui/Wenhan/WL/kappa_map/scripts/redshift_info.txt', type=str, help='path to z cat')
     parser.add_argument("-g", "--n-galaxy", default=50, type=float, help='number of galaxies per arcmin (to determine noise level)')
     parser.add_argument("-e", "--epochs", default=128, type=int, help='number of total epochs to train')
     parser.add_argument("-b", "--batch-size", default=32, type=int, help='batch size')
-    parser.add_argument("--lr", default=1e-3, type=float, help='initial learning rate')
+    parser.add_argument("--lr", default=1e-4, type=float, help='initial learning rate')
     parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
     parser.add_argument("--ks", default=False, action='store_true', help='predict kappa using KS deconvolution and make this an extra channel')
+    parser.add_argument("--shear", default=False, action='store_true', help='use shear with halo to predict density')
+    parser.add_argument("--kappa", default=False, action='store_true', help='use kappa with halo to predict density')
     parser.add_argument("--loss-mode", default='native', type=str, choices=['native', 'gaus'], help='loss function mode')
     parser.add_argument("--loss-fn", default='Huber', type=str, choices=['MSE', 'Huber'], help='loss function: MSE or Huberloss')
     parser.add_argument("--huber-delta", default=50, type=float, help='delta value for Huberloss')
-    parser.add_argument("--weight-decay", default=0, type=float, help='weight decay for AdamW optimizer')
+    parser.add_argument("--weight-decay", default=1e-4, type=float, help='weight decay for AdamW optimizer')
     parser.add_argument("--param-count", default=False, action='store_true', help='show model parameter count summary')
     
     return parser.parse_args()

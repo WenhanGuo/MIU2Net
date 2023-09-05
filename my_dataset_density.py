@@ -2,74 +2,85 @@ import torch
 from torch.utils.data import Dataset
 import transforms as T
 import numpy as np
+import pandas as pd
 import astropy.io.fits as fits
-import h5py
 from astropy.table import Table
+from astropy.constants import G
+from astropy.cosmology import WMAP9
+import astropy.units as u
+import astropy.cosmology.units as cu
 
 
 # Dataset class for our own data structure
 class ImageDataset(Dataset):
-    def __init__(self, catalog, n_galaxy, lens_zslices, src_zslices, transforms, gaus_blur=None):
+    def __init__(self, catalog, z_cat, n_galaxy, lens_zslices, src_zslices, transforms, gaus_blur=None):
         """
-        catalog: name of .csv file containing image names to be read
+        catalog: name of .ecsv file containing image names to be read
         data_dir: path to data directory containing gamma1, gamma2, kappa folders
         transforms: equivariant transformations to input data (gamma) and target (kappa) prior to training
         gaus_noise: adding gaussian noise to input data (gamma) prior to training 
         """
         self.catalog = Table.read(catalog)
+        z_cat = pd.read_csv(z_cat, sep=' ')
+        self.z_list = np.array(z_cat['z_lens'])
         self.n_galaxy = n_galaxy
         self.lens_zslices = lens_zslices
         self.src_zslices = src_zslices
         self.transforms = transforms
         self.gaus_blur = gaus_blur
-        self.counter = 0
+        self.Sigma_mean = np.float32(self.mean_density())
     
     def __len__(self):
         return len(self.catalog)
 
-    def read_lens(self, idx, img_type=['gamma1', 'gamma2', 'kappa']):
-        cube_name = self.catalog[img_type][idx]
-        with fits.open(cube_name, memmap=False) as f:
-            cube = f[0].data[self.lens_zslices]
+    def read_data(self, idx, img_type=['gamma1', 'gamma2', 'kappa', 'halo', 'density']):
+        if img_type in ['gamma1', 'gamma2', 'kappa']:
+            img_names = self.catalog[img_type][idx][self.src_zslices]
+        elif img_type in ['halo', 'density']:
+            img_names = self.catalog[img_type][idx][self.lens_zslices]
+        # img_names = self.catalog[img_type][idx][self.lens_zslices]
+        
+        cube = None
+        for img_name in img_names:
+            with fits.open(img_name, memmap=False) as f:
+                cube = np.dstack([cube, f[0].data]) if cube else f[0].data
         return np.float32(cube)   # force apply float32 to resolve endian conflict
+    
+    def mean_density(self):
+        zs = self.z_list[self.lens_zslices]   # list of z values for the given slice indexes
+        d_list = (zs*cu.redshift).to(u.Mpc, cu.with_redshift(WMAP9))   # convert z to distance (Mpc)
+        d_list = np.array(d_list.value)
+        arcmin2kpc = (1/60/180*np.pi) * d_list * 1000   # for a given distance, how many kpc is a arcmin
 
-    def read_halo(self, idx):
-        cube_name = self.catalog['halo'][idx]
-        with fits.open(cube_name, memmap=False) as f:
-            cube = f[0].data[self.src_zslices]
-        return np.float32(cube)   # downgrade to float32
+        H = WMAP9.H(z=zs)   # Hubble constant for given list of z values
+        rho_crit = (3 * H**2) / (8 * np.pi * G)   # critical volume densities
+        rho_crit = rho_crit.to(u.Msun / u.kpc**3)   # volume density, unit = M☉/kpc^3
+        # integrate volume density along the depth of a slice (64 Mpc)
+        Sigma_crit = rho_crit * 64000 * u.kpc   # surface density, unit = M☉/kpc^2
 
-    def read_density(self, idx):
-        mat_name = self.catalog['density'][idx]
-        with h5py.File(mat_name, 'r') as f:
-            variables = {}
-            for k, v in f.items():
-                variables[k] = np.array(v)
-        cube = variables['Sigma_2D'][self.src_zslices]
-        return np.float32(cube)   # downgrade to float32
+        return Sigma_crit.value * arcmin2kpc**2   # mean surface density for the slice
 
     def __getitem__(self, idx):
-        # print(self.counter)
-        self.counter += 1
-
-        # read in images
-        gamma1 = self.read_lens(idx, img_type='gamma1')
-        gamma2 = self.read_lens(idx, img_type='gamma2')
         tt = T.ToTensor()
         gn = T.AddGaussianNoise(n_galaxy=self.n_galaxy)
+        # read in images
+        gamma1 = self.read_data(idx, img_type='gamma1')
+        gamma2 = self.read_data(idx, img_type='gamma2')
         gamma1, gamma2 = gn(tt(gamma1)), gn(tt(gamma2))
-        # kappa = self.read_lens(idx, img_type='kappa')
+        # kappa = self.read_data(idx, img_type='kappa')
+        # kappa = tt(kappa)
 
-        halo = self.read_halo(idx)
-        density = self.read_density(idx)
+        halo = self.read_data(idx, img_type='halo')
+        density = self.read_data(idx, img_type='density')
         halo = torch.log10(tt(halo))
-        density = tt(density)
-        density = torch.log10(density + abs(torch.min(density)) + 1)
+        density = tt((density + self.Sigma_mean) / self.Sigma_mean)
         # print('halo max, min =', torch.max(halo), torch.min(halo))
         # print('density max, min =', torch.max(density), torch.min(density))
 
         # assemble image cube and target cube
+        # image = halo
         image = torch.concat([gamma1, gamma2, halo], dim=0)
+        # image = torch.concat([kappa, halo], dim=0)
         target = density
 
         # apply transforms

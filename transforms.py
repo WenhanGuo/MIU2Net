@@ -19,8 +19,7 @@ class Compose(object):
 
 class ToTensor(object):
     def __call__(self, image):
-        image = F.to_tensor(np.transpose(image, (1, 2, 0)))
-        return image
+        return F.to_tensor(image)
 
 
 class Normalize(object):
