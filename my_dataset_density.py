@@ -43,7 +43,7 @@ class ImageDataset(Dataset):
         cube = None
         for img_name in img_names:
             with fits.open(img_name, memmap=False) as f:
-                cube = np.dstack([cube, f[0].data]) if cube else f[0].data
+                cube = np.stack([cube, f[0].data], axis=0) if cube else f[0].data
         return np.float32(cube)   # force apply float32 to resolve endian conflict
     
     def mean_density(self):
