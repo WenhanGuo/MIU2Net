@@ -43,7 +43,7 @@ class ImageDataset(Dataset):
         cube = None
         for img_name in img_names:
             with fits.open(img_name, memmap=False) as f:
-                cube = np.stack([cube, f[0].data], axis=0) if cube else f[0].data
+                cube = np.stack([cube, f[0].data], axis=2) if cube is not None else f[0].data
         return np.float32(cube)   # force apply float32 to resolve endian conflict
     
     def mean_density(self):
@@ -65,8 +65,10 @@ class ImageDataset(Dataset):
         gn = T.AddGaussianNoise(n_galaxy=self.n_galaxy)
         # read in images
         gamma1 = self.read_data(idx, img_type='gamma1')
+        print('gamma1 shape before tt =', gamma1.shape)
         gamma2 = self.read_data(idx, img_type='gamma2')
         gamma1, gamma2 = gn(tt(gamma1)), gn(tt(gamma2))
+        print('gamma1 shape after tt =', gamma1.shape)
         # kappa = self.read_data(idx, img_type='kappa')
         # kappa = tt(kappa)
 
@@ -80,8 +82,10 @@ class ImageDataset(Dataset):
         # assemble image cube and target cube
         # image = halo
         image = torch.concat([gamma1, gamma2, halo], dim=0)
+        print('image shape =', image.shape)
         # image = torch.concat([kappa, halo], dim=0)
         target = density
+        print('target shape =', target.shape)
 
         # apply transforms
         image, target = self.transforms(image, target)
