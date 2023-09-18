@@ -1,7 +1,7 @@
 import torch
 import transforms as T
 from torchvision.transforms import GaussianBlur
-from my_dataset import ImageDataset_density
+from my_dataset import ImageDataset_kappa3d
 from torch.utils.data import DataLoader, Subset
 import os
 import argparse
@@ -24,16 +24,19 @@ def main(args):
     assert args.num <= len(test_cat)
     test_cat = test_cat[:args.num]
 
+    shear_zslices = args.shear_z
+    kappa_zslices = args.kappa_z
+
     if args.gaus_blur == True:
         target_gb = GaussianBlur(kernel_size=5, sigma=2.0)
     else:
         target_gb = None
     # load test dataset and dataloader
-    test_data = ImageDataset_density(catalog=catalog_name, 
+    test_data = ImageDataset_kappa3d(catalog=catalog_name, 
                                      z_cat=args.zcat, 
                                      n_galaxy=args.n_galaxy, 
-                                     lens_zslices=[10], 
-                                     src_zslices=[15], 
+                                     shear_zslices=shear_zslices, 
+                                     kappa_zslices=kappa_zslices, 
                                      transforms=T.Compose([
                                          T.KS_rec(activate=args.ks), 
                                          T.RandomCrop(size=512)
@@ -51,15 +54,19 @@ def main(args):
     test_step = 0
     with torch.no_grad():
         for image, target in test_dataloader:
-            image = image.to(device, memory_format=torch.channels_last)
-            target = target.to(device, memory_format=torch.channels_last)
-            y_pred = np.float32(model(image)[0][0].cpu())
-            y_true = np.float32(target[0][0].cpu())
+            image_g = image.to(device, memory_format=torch.channels_last)
+            target_g = target.to(device, memory_format=torch.channels_last)
+            y_pred = np.float32(model(image_g)[0].cpu())
+            y_true = np.float32(target_g[0].cpu())
             res = y_true - y_pred
-            map_name = test_cat['density'][test_step][10]
+            map_name = test_cat['kappa'][test_step][12]
             base_name = os.path.basename(map_name)
-            map_path = os.path.join('../result/prediction', base_name)
-            save_img(y_pred, y_true, res, map_path)
+            map_path = os.path.join('../result/prediction', 'pred_'+base_name)
+
+            # save_img(y_pred, y_true, res, map_path)
+            cube = np.concatenate([np.float32(image.cpu())[0], y_pred, y_true, res], axis=0)
+            print('writeto cube shape =', cube.shape)
+            fits.writeto(map_path, data=cube, overwrite=True)
             test_step += 1
             print(f'{test_step} imgs completed')
 
@@ -71,6 +78,8 @@ def get_args():
     parser.add_argument("--num", default=32, type=int, help='number of test images to run')
     parser.add_argument("--dir", default='/ksmap', type=str, help='data directory')
     parser.add_argument("--zcat", default='/share/lirui/Wenhan/WL/kappa_map/scripts/redshift_info.txt', type=str, help='path to zcat')
+    parser.add_argument("--shear-z", default=[36], help='list of shear z slices for input')
+    parser.add_argument("--kappa-z", default=[36], help='list of kappa z slices to predict')
     parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
     parser.add_argument("--ks", default=False, action='store_true', help='predict kappa using KS deconvolution and make this an extra channel')
     return parser.parse_args()
