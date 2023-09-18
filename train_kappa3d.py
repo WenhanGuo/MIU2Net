@@ -1,6 +1,6 @@
 #! -*- coding: utf-8 -*-
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 from model_u2net import u2net_full
 import torch
@@ -135,10 +135,10 @@ def main(args):
     scaler = torch.cuda.amp.GradScaler()   # Use torch.cuda.amp for mixed precision training
 
     # use tensorboard to visualize computation
-    writer = SummaryWriter("../logs_train")
+    writer = SummaryWriter("../tlogs_kappa3d")
     # delete existing tensorboard logs
-    shutil.rmtree('../logs_train')
-    os.mkdir('../logs_train')
+    shutil.rmtree('../tlogs_kappa3d')
+    os.mkdir('../tlogs_kappa3d')
 
     # begin training
     total_train_step = 0
@@ -231,7 +231,7 @@ def main(args):
         if not best_loss:
             best_loss = val_loss
         elif val_loss < best_loss:
-            torch.save(model, f'../models/best_epoch{i+1}.pth')
+            torch.save(model, f'../models/kappa3d_e{i+1}.pth')
             print(f"saved best loss model at epoch = {i+1}!")
             best_loss = val_loss
             best_epoch = i+1
@@ -246,7 +246,7 @@ def get_args():
     parser.add_argument("--dir", default='/ksmap', type=str, help='data directory')
     parser.add_argument("--zcat", default='/share/lirui/Wenhan/WL/kappa_map/scripts/redshift_info.txt', type=str, help='path to z cat')
     parser.add_argument("-g", "--n-galaxy", default=50, type=float, help='number of galaxies per arcmin (to determine noise level)')
-    parser.add_argument("-e", "--epochs", default=128, type=int, help='number of total epochs to train')
+    parser.add_argument("-e", "--epochs", default=256, type=int, help='number of total epochs to train')
     parser.add_argument("-b", "--batch-size", default=32, type=int, help='batch size')
     parser.add_argument("--lr", default=1e-4, type=float, help='initial learning rate')
 

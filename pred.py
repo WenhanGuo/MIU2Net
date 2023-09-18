@@ -29,9 +29,8 @@ def main(args):
         shear_gb = None
     # load test dataset and dataloader
     test_args = dict(data_dir=args.dir, 
+                     n_galaxy=args.n_galaxy, 
                      transforms=T.Compose([
-                         T.ToTensor(), 
-                         T.AddGaussianNoise(n_galaxy=args.n_galaxy), 
                          T.KS_rec(activate=args.ks)
                          ]), 
                      gaus_blur=shear_gb

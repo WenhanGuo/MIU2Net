@@ -1,6 +1,6 @@
 #! -*- coding: utf-8 -*-
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '4,5'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 from model_u2net import u2net_full
 import torch
@@ -69,9 +69,8 @@ def main(args):
         shear_gb = None
 
     train_args = dict(data_dir=args.dir, 
+                      n_galaxy=args.n_galaxy, 
                       transforms=T.Compose([
-                          T.ToTensor(), 
-                          T.AddGaussianNoise(n_galaxy=args.n_galaxy), 
                           T.KS_rec(activate=args.ks), 
                           T.RandomHorizontalFlip(prob=0.5), 
                           T.RandomVerticalFlip(prob=0.5), 
@@ -81,9 +80,8 @@ def main(args):
                       gaus_blur=shear_gb
                       )
     valid_args = dict(data_dir=args.dir, 
+                      n_galaxy=args.n_galaxy, 
                       transforms=T.Compose([
-                          T.ToTensor(), 
-                          T.AddGaussianNoise(n_galaxy=args.n_galaxy), 
                           T.KS_rec(activate=args.ks), 
                           ]), 
                       gaus_blur=shear_gb
@@ -91,7 +89,7 @@ def main(args):
     train_data = ImageDataset(catalog=os.path.join(args.dir, 'train.csv'), **train_args)
     val_data = ImageDataset(catalog=os.path.join(args.dir, 'validation.csv'), **valid_args)
     # prepare train and validation dataloaders
-    loader_args = dict(batch_size=args.batch_size, num_workers=os.cpu_count(), pin_memory=True)
+    loader_args = dict(batch_size=args.batch_size, num_workers=8, pin_memory=True)
     train_loader = DataLoader(train_data, shuffle=True, **loader_args)
     val_loader = DataLoader(val_data, shuffle=True, drop_last=True, **loader_args)
 
@@ -129,10 +127,10 @@ def main(args):
     scaler = torch.cuda.amp.GradScaler()   # Use torch.cuda.amp for mixed precision training
 
     # use tensorboard to visualize computation
-    writer = SummaryWriter("logs_train")
+    writer = SummaryWriter("../tlogs_kappa2d")
     # delete existing tensorboard logs
-    shutil.rmtree('./logs_train')
-    os.mkdir('./logs_train')
+    shutil.rmtree('../tlogs_kappa2d')
+    os.mkdir('../tlogs_kappa2d')
 
     # begin training
     total_train_step = 0
@@ -219,7 +217,7 @@ def main(args):
         if not best_loss:
             best_loss = val_loss
         elif val_loss < best_loss:
-            torch.save(model, f'./models/best_epoch{i+1}.pth')
+            torch.save(model, f'../models/kappa2d_e{i+1}.pth')
             print(f"saved best loss model at epoch = {i+1}!")
             best_loss = val_loss
             best_epoch = i+1
@@ -233,8 +231,8 @@ def get_args():
     parser = argparse.ArgumentParser(description='Train U2Net')
     parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/data_new', type=str, help='data directory')
     parser.add_argument("-g", "--n-galaxy", default=50, type=float, help='number of galaxies per arcmin (to determine noise level)')
-    parser.add_argument("-e", "--epochs", default=64, type=int, help='number of total epochs to train')
-    parser.add_argument("-b", "--batch-size", default=64, type=int, help='batch size')
+    parser.add_argument("-e", "--epochs", default=256, type=int, help='number of total epochs to train')
+    parser.add_argument("-b", "--batch-size", default=32, type=int, help='batch size')
     parser.add_argument("--lr", default=1e-4, type=float, help='initial learning rate')
     parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
     parser.add_argument("--ks", default=False, action='store_true', help='predict kappa using KS deconvolution and make this an extra channel')

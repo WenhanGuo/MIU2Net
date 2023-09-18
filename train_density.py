@@ -133,10 +133,10 @@ def main(args):
     scaler = torch.cuda.amp.GradScaler()   # Use torch.cuda.amp for mixed precision training
 
     # use tensorboard to visualize computation
-    writer = SummaryWriter("../logs_train")
+    writer = SummaryWriter("../tlogs_density")
     # delete existing tensorboard logs
-    shutil.rmtree('../logs_train')
-    os.mkdir('../logs_train')
+    shutil.rmtree('../tlogs_density')
+    os.mkdir('../tlogs_density')
 
     # begin training
     total_train_step = 0

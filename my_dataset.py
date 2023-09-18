@@ -17,7 +17,7 @@ import astropy.cosmology.units as cu
 
 # Dataset class for our own data structure
 class ImageDataset(Dataset):
-    def __init__(self, catalog, data_dir, transforms=None, gaus_blur=None):
+    def __init__(self, catalog, data_dir, n_galaxy, transforms=None, gaus_blur=None):
         """
         catalog: name of .csv file containing image names to be read
         data_dir: path to data directory containing gamma1, gamma2, kappa folders
@@ -26,6 +26,7 @@ class ImageDataset(Dataset):
         """
         self.img_names = pd.read_csv(catalog)
         self.data_dir = data_dir
+        self.n_galaxy = n_galaxy
         self.transforms = transforms
         self.gaus_blur = gaus_blur
     
@@ -44,19 +45,26 @@ class ImageDataset(Dataset):
         gamma1 = self.read_img(idx, img_type='gamma1')
         gamma2 = self.read_img(idx, img_type='gamma2')
         kappa = self.read_img(idx, img_type='kappa')
+
         # reformat data shapes
         gamma = np.array([gamma1, gamma2])
         gamma = np.moveaxis(gamma, 0, 2)
         kappa = np.expand_dims(kappa, 2)
+        
+        tt = T.ToTensor()
+        gn = T.AddGaussianNoise(n_galaxy=self.n_galaxy)
+        image = gn(tt(gamma))
+        target = tt(kappa)
+
         # apply transforms
         if self.transforms:
-            gamma, kappa = self.transforms(gamma, kappa)
+            image, target = self.transforms(image, target)
         if self.gaus_blur:
-            gamma = self.gaus_blur(gamma)
+            target = self.gaus_blur(target)
         
         # gamma shape = torch.Size([2, 512, 512]); kappa shape = torch.Size([1, 512, 512])
         # if ks: gamma shape = torch.Size([3, 512, 512]); last channel is ks map
-        return gamma, kappa
+        return image, target
 
 
 
