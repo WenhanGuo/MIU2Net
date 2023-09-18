@@ -29,44 +29,46 @@ def main(args):
     else:
         shear_gb = None
     # load test dataset and dataloader
-    test_args = dict(data_dir=args.dir, 
-                     n_galaxy=args.n_galaxy, 
-                     transforms=T.Compose([
-                         T.KS_rec(activate=args.ks), 
-                         T.RandomCrop(size=512)
-                         ]), 
-                     gaus_blur=shear_gb
-                     )
-    test_data = ImageDataset(catalog=os.path.join(args.dir, 'test.ecsv'), **test_args)
+    test_data = ImageDataset(catalog=catalog_name, 
+                             n_galaxy=args.n_galaxy, 
+                             transforms=T.Compose([
+                                 T.KS_rec(activate=args.ks), 
+                                 T.RandomCrop(size=512)
+                                 ]), 
+                             gaus_blur=shear_gb
+                             )
     test_data = Subset(test_data, np.arange(args.num))
     test_dataloader = DataLoader(test_data, shuffle=False, batch_size=1)
 
     # load model weights
     model = torch.load(f'../models/{args.name}.pth')
-    model = model.to(memory_format=torch.channels_last)
-    model.to(device=device)
+    model.to(device=device, memory_format=torch.channels_last)
     torch.cuda.empty_cache()
 
     model.eval()
     test_step = 0
     with torch.no_grad():
-        for gamma, kappa in test_dataloader:
-            gamma = gamma.to(device, memory_format=torch.channels_last)
-            kappa = kappa.to(device, memory_format=torch.channels_last)
-            y_pred = np.float32(model(gamma)[0][0].cpu())
-            y_true = np.float32(kappa[0][0].cpu())
+        for image, target in test_dataloader:
+            image_g = image.to(device, memory_format=torch.channels_last)
+            target_g = target.to(device, memory_format=torch.channels_last)
+            y_pred = np.float32(model(image_g)[0].cpu())
+            y_true = np.float32(target_g[0].cpu())
             res = y_true - y_pred
-            map_name = test_cat['kappa'][test_step]
-            map_path = os.path.join('../result/prediction', map_name)
-            save_img(y_pred, y_true, res, map_path)
-            test_step += 1
+            map_name = test_cat['kappa'][test_step][0]
+            base_name = os.path.basename(map_name)
+            map_path = os.path.join('../result/prediction', 'pred_'+base_name)
 
+            cube = np.concatenate([np.float32(image.cpu())[0], y_pred, y_true, res], axis=0)
+            print('writeto cube shape =', cube.shape)
+            fits.writeto(map_path, data=cube, overwrite=True)
+            test_step += 1
+            print(f'{test_step} imgs completed')
 
 def get_args():
     parser = argparse.ArgumentParser(description='Predict kappa from test shear')
     parser.add_argument('name', type=str, help='name of weights file')
     parser.add_argument("-g", "--n-galaxy", default=50, type=float, help='number of galaxies per arcmin (to determine noise level)')
-    parser.add_argument("--num", default=32, type=int, help='number of test images to run')
+    parser.add_argument("--num", default=8, type=int, help='number of test images to run')
     parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/data_1024_2d', type=str, help='data directory')
     parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
     parser.add_argument("--ks", default='off', type=str, choices=['off', 'add', 'only'], help='KS93 deconvolution (no KS, KS as an extra channel, no shear and KS only)')

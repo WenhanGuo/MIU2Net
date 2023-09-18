@@ -40,7 +40,7 @@ def main(args):
                                      transforms=T.Compose([
                                          T.KS_rec(activate=args.ks), 
                                          T.RandomCrop(size=512)
-                                     ]), 
+                                         ]), 
                                      gaus_blur=target_gb)
     test_data = Subset(test_data, np.arange(args.num))
     test_dataloader = DataLoader(test_data, shuffle=False, batch_size=1, num_workers=2)
@@ -59,11 +59,10 @@ def main(args):
             y_pred = np.float32(model(image_g)[0].cpu())
             y_true = np.float32(target_g[0].cpu())
             res = y_true - y_pred
-            map_name = test_cat['kappa'][test_step][12]
+            map_name = test_cat['kappa'][test_step][0]
             base_name = os.path.basename(map_name)
             map_path = os.path.join('../result/prediction', 'pred_'+base_name)
 
-            # save_img(y_pred, y_true, res, map_path)
             cube = np.concatenate([np.float32(image.cpu())[0], y_pred, y_true, res], axis=0)
             print('writeto cube shape =', cube.shape)
             fits.writeto(map_path, data=cube, overwrite=True)
@@ -75,13 +74,14 @@ def get_args():
     parser = argparse.ArgumentParser(description='Predict density from halo map and shear')
     parser.add_argument('name', type=str, help='name of weights file')
     parser.add_argument("-g", "--n-galaxy", default=50, type=float, help='number of galaxies per arcmin (to determine noise level)')
-    parser.add_argument("--num", default=32, type=int, help='number of test images to run')
-    parser.add_argument("--dir", default='/ksmap', type=str, help='data directory')
+    parser.add_argument("--num", default=8, type=int, help='number of test images to run')
+    # parser.add_argument("--dir", default='/ksmap', type=str, help='data directory')
+    parser.add_argument("--dir", default='//share/lirui/Wenhan/WL/data_1024_2d', type=str, help='data directory')
     parser.add_argument("--zcat", default='/share/lirui/Wenhan/WL/kappa_map/scripts/redshift_info.txt', type=str, help='path to zcat')
-    parser.add_argument("--shear-z", default=[36], help='list of shear z slices for input')
-    parser.add_argument("--kappa-z", default=[36], help='list of kappa z slices to predict')
+    parser.add_argument("--shear-z", default=[0], help='list of shear z slices for input')
+    parser.add_argument("--kappa-z", default=[0], help='list of kappa z slices to predict')
     parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
-    parser.add_argument("--ks", default=False, action='store_true', help='predict kappa using KS deconvolution and make this an extra channel')
+    parser.add_argument("--ks", default='off', type=str, choices=['off', 'add', 'only'], help='KS93 deconvolution (no KS, KS as an extra channel, no shear and KS only)')
     return parser.parse_args()
 
 

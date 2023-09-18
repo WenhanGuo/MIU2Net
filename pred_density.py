@@ -68,7 +68,7 @@ def get_args():
     parser = argparse.ArgumentParser(description='Predict density from halo map and shear')
     parser.add_argument('name', type=str, help='name of weights file')
     parser.add_argument("-g", "--n-galaxy", default=50, type=float, help='number of galaxies per arcmin (to determine noise level)')
-    parser.add_argument("--num", default=32, type=int, help='number of test images to run')
+    parser.add_argument("--num", default=8, type=int, help='number of test images to run')
     parser.add_argument("--dir", default='/ksmap', type=str, help='data directory')
     parser.add_argument("--zcat", default='/share/lirui/Wenhan/WL/kappa_map/scripts/redshift_info.txt', type=str, help='path to zcat')
     parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')

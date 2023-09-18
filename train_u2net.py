@@ -93,7 +93,14 @@ def main(args):
     val_loader = DataLoader(val_data, shuffle=True, drop_last=True, **loader_args)
 
     # initialize UNet model
-    model = u2net_full(in_ch=3) if args.ks == True else u2net_full(in_ch=2)
+    in_channels = 2
+    if args.ks == 'add':
+        in_channels += 1
+    elif args.ks == 'only':
+        in_channels = 1
+    print('in_channels =', in_channels)
+    model = u2net_full(in_ch=in_channels)
+
     if args.param_count == True:
         count_parameters(model)
     # data parallel training on multiple GPUs (restrained by cuda visible devices)
@@ -229,7 +236,7 @@ def get_args():
     import argparse
     parser = argparse.ArgumentParser(description='Train U2Net')
     parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/data_1024_2d', type=str, help='data directory')
-    parser.add_argument("--cpu", default=4, type=int, help='number of cpu cores to use')
+    parser.add_argument("--cpu", default=32, type=int, help='number of cpu cores to use')
     parser.add_argument("-g", "--n-galaxy", default=50, type=float, help='number of galaxies per arcmin (to determine noise level)')
     parser.add_argument("-e", "--epochs", default=256, type=int, help='number of total epochs to train')
     parser.add_argument("-b", "--batch-size", default=32, type=int, help='batch size')

@@ -249,7 +249,7 @@ def get_args():
     parser = argparse.ArgumentParser(description='Train U2Net')
     parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/data_1024_2d', type=str, help='data directory')
     # parser.add_argument("--dir", default='/ksmap', type=str, help='data directory')
-    parser.add_argument("--cpu", default=4, type=int, help='number of cpu cores to use')
+    parser.add_argument("--cpu", default=32, type=int, help='number of cpu cores to use')
     parser.add_argument("--zcat", default='/share/lirui/Wenhan/WL/kappa_map/scripts/redshift_info.txt', type=str, help='path to z cat')
     parser.add_argument("-g", "--n-galaxy", default=50, type=float, help='number of galaxies per arcmin (to determine noise level)')
     parser.add_argument("-e", "--epochs", default=256, type=int, help='number of total epochs to train')
