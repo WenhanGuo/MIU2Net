@@ -1,6 +1,6 @@
 #! -*- coding: utf-8 -*-
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '5'
 
 from model_u2net import u2net_full
 import torch
@@ -93,13 +93,17 @@ def main(args):
                                     ]), 
                                     gaus_blur=target_gb)
     # prepare train and validation dataloaders
-    loader_args = dict(batch_size=args.batch_size, num_workers=1, pin_memory=True)
+    loader_args = dict(batch_size=args.batch_size, num_workers=args.cpu, pin_memory=True)
     train_loader = DataLoader(train_data, shuffle=True, **loader_args)
     val_loader = DataLoader(val_data, shuffle=True, drop_last=True, **loader_args)
     print('loader initialized.')
 
     # initialize UNet model
-    in_channels = int(sum([len(shear_zslices)*2, args.ks*len(shear_zslices)]))
+    in_channels = int(len(shear_zslices)*2)
+    if args.ks == 'add':
+        in_channels += 1
+    elif args.ks == 'only':
+        in_channels = 1
     print('in_channels =', in_channels)
     model = u2net_full(in_ch=in_channels)
 
@@ -243,18 +247,22 @@ def main(args):
 def get_args():
     import argparse
     parser = argparse.ArgumentParser(description='Train U2Net')
-    parser.add_argument("--dir", default='/ksmap', type=str, help='data directory')
+    parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/data_1024_2d', type=str, help='data directory')
+    # parser.add_argument("--dir", default='/ksmap', type=str, help='data directory')
+    parser.add_argument("--cpu", default=4, type=int, help='number of cpu cores to use')
     parser.add_argument("--zcat", default='/share/lirui/Wenhan/WL/kappa_map/scripts/redshift_info.txt', type=str, help='path to z cat')
     parser.add_argument("-g", "--n-galaxy", default=50, type=float, help='number of galaxies per arcmin (to determine noise level)')
     parser.add_argument("-e", "--epochs", default=256, type=int, help='number of total epochs to train')
     parser.add_argument("-b", "--batch-size", default=32, type=int, help='batch size')
     parser.add_argument("--lr", default=1e-4, type=float, help='initial learning rate')
 
-    parser.add_argument("--shear-z", default=[36], help='list of shear z slices for input')
-    parser.add_argument("--kappa-z", default=[36], help='list of kappa z slices to predict')
+    parser.add_argument("--shear-z", default=[0], help='list of shear z slices for input')
+    parser.add_argument("--kappa-z", default=[0], help='list of kappa z slices to predict')
+    # parser.add_argument("--shear-z", default=[32, 36], help='list of shear z slices for input')
+    # parser.add_argument("--kappa-z", default=[32, 36], help='list of kappa z slices to predict')
 
     parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
-    parser.add_argument("--ks", default=False, action='store_true', help='predict kappa using KS deconvolution and make this an extra channel')
+    parser.add_argument("--ks", default='off', type=str, choices=['off', 'add', 'only'], help='KS93 deconvolution (no KS, KS as an extra channel, no shear and KS only)')
     parser.add_argument("--loss-mode", default='native', type=str, choices=['native', 'gaus'], help='loss function mode')
     parser.add_argument("--loss-fn", default='Huber', type=str, choices=['MSE', 'Huber'], help='loss function: MSE or Huberloss')
     parser.add_argument("--huber-delta", default=50, type=float, help='delta value for Huberloss')

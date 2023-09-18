@@ -127,13 +127,19 @@ class KS_rec(object):
         return y
 
     def __call__(self, image, target):
-        if self.activate == True:
+        if self.activate == 'off':
+            return image, target
+        
+        elif self.activate == 'add':
             # perdict kappa using KS and add it as a 3rd channel to gamma
+            # if ks add: image shape = torch.Size([3, 512, 512]); last channel is ks map
             ks_kappa = self.shear_rec(-image[0], image[1])   # the negative sign is important
             image = torch.concat((image, ks_kappa.unsqueeze(0)), dim=0)
             return image, target
-        # gamma shape = torch.Size([2, 512, 512]); kappa shape = torch.Size([1, 512, 512])
-        # if ks: gamma shape = torch.Size([3, 512, 512]); last channel is ks map
-        else:
-            # do nothing
+            
+        elif self.activate == 'only':
+            # perdict kappa using KS and remove shear information
+            # if ks only: image shape = torch.Size([1, 512, 512])
+            ks_kappa = self.shear_rec(-image[0], image[1])   # the negative sign is important
+            image = ks_kappa
             return image, target

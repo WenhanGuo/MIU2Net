@@ -6,8 +6,8 @@ from torch.utils.data import DataLoader, Subset
 import os
 import argparse
 import numpy as np
-import pandas as pd
 import astropy.io.fits as fits
+from astropy.table import Table
 
 
 def save_img(pred, true, res, fname):
@@ -19,7 +19,8 @@ def save_img(pred, true, res, fname):
 
 
 def main(args):
-    test_cat = pd.read_csv(os.path.join(args.dir, 'test.csv'))
+    catalog_name = os.path.join(args.dir, 'test.ecsv')
+    test_cat = Table.read(catalog_name)
     assert args.num <= len(test_cat)
     test_cat = test_cat[:args.num]
 
@@ -31,16 +32,17 @@ def main(args):
     test_args = dict(data_dir=args.dir, 
                      n_galaxy=args.n_galaxy, 
                      transforms=T.Compose([
-                         T.KS_rec(activate=args.ks)
+                         T.KS_rec(activate=args.ks), 
+                         T.RandomCrop(size=512)
                          ]), 
                      gaus_blur=shear_gb
                      )
-    test_data = ImageDataset(catalog=os.path.join(args.dir, 'test.csv'), **test_args)
+    test_data = ImageDataset(catalog=os.path.join(args.dir, 'test.ecsv'), **test_args)
     test_data = Subset(test_data, np.arange(args.num))
     test_dataloader = DataLoader(test_data, shuffle=False, batch_size=1)
 
     # load model weights
-    model = torch.load(f'./models/{args.name}.pth')
+    model = torch.load(f'../models/{args.name}.pth')
     model = model.to(memory_format=torch.channels_last)
     model.to(device=device)
     torch.cuda.empty_cache()
@@ -65,9 +67,9 @@ def get_args():
     parser.add_argument('name', type=str, help='name of weights file')
     parser.add_argument("-g", "--n-galaxy", default=50, type=float, help='number of galaxies per arcmin (to determine noise level)')
     parser.add_argument("--num", default=32, type=int, help='number of test images to run')
-    parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/data_new', type=str, help='data directory')
+    parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/data_1024_2d', type=str, help='data directory')
     parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
-    parser.add_argument("--ks", default=False, action='store_true', help='predict kappa using KS deconvolution and make this an extra channel')
+    parser.add_argument("--ks", default='off', type=str, choices=['off', 'add', 'only'], help='KS93 deconvolution (no KS, KS as an extra channel, no shear and KS only)')
     return parser.parse_args()
 
 

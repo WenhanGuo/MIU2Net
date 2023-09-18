@@ -91,7 +91,7 @@ def main(args):
                                     ]), 
                                     gaus_blur=target_gb)
     # prepare train and validation dataloaders
-    loader_args = dict(batch_size=args.batch_size, num_workers=2, pin_memory=True)
+    loader_args = dict(batch_size=args.batch_size, num_workers=args.cpu, pin_memory=True)
     train_loader = DataLoader(train_data, shuffle=True, **loader_args)
     val_loader = DataLoader(val_data, shuffle=True, drop_last=True, **loader_args)
     print('loader initialized.')
@@ -242,13 +242,14 @@ def get_args():
     import argparse
     parser = argparse.ArgumentParser(description='Train U2Net')
     parser.add_argument("--dir", default='/ksmap', type=str, help='data directory')
+    parser.add_argument("--cpu", default=4, type=int, help='number of cpu cores to use')
     parser.add_argument("--zcat", default='/share/lirui/Wenhan/WL/kappa_map/scripts/redshift_info.txt', type=str, help='path to z cat')
     parser.add_argument("-g", "--n-galaxy", default=50, type=float, help='number of galaxies per arcmin (to determine noise level)')
     parser.add_argument("-e", "--epochs", default=128, type=int, help='number of total epochs to train')
     parser.add_argument("-b", "--batch-size", default=32, type=int, help='batch size')
     parser.add_argument("--lr", default=1e-4, type=float, help='initial learning rate')
     parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
-    parser.add_argument("--ks", default=False, action='store_true', help='predict kappa using KS deconvolution and make this an extra channel')
+    parser.add_argument("--ks", default='off', type=str, choices=['off', 'add', 'only'], help='KS93 deconvolution (no KS, KS as an extra channel, no shear and KS only)')
     parser.add_argument("--shear", default=False, action='store_true', help='use shear with halo to predict density')
     parser.add_argument("--kappa", default=False, action='store_true', help='use kappa with halo to predict density')
     parser.add_argument("--loss-mode", default='native', type=str, choices=['native', 'gaus'], help='loss function mode')

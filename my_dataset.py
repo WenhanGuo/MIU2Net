@@ -17,15 +17,14 @@ import astropy.cosmology.units as cu
 
 # Dataset class for our own data structure
 class ImageDataset(Dataset):
-    def __init__(self, catalog, data_dir, n_galaxy, transforms=None, gaus_blur=None):
+    def __init__(self, catalog, n_galaxy, transforms, gaus_blur=None):
         """
         catalog: name of .csv file containing image names to be read
         data_dir: path to data directory containing gamma1, gamma2, kappa folders
         transforms: equivariant transformations to input data (gamma) and target (kappa) prior to training
         gaus_noise: adding gaussian noise to input data (gamma) prior to training 
         """
-        self.img_names = pd.read_csv(catalog)
-        self.data_dir = data_dir
+        self.img_names = Table.read(catalog)
         self.n_galaxy = n_galaxy
         self.transforms = transforms
         self.gaus_blur = gaus_blur
@@ -34,9 +33,8 @@ class ImageDataset(Dataset):
         return len(self.img_names)
     
     def read_img(self, idx, img_type=['gamma1', 'gamma2', 'kappa']):
-        img_name = self.img_names[img_type][idx]   # get single image name
-        img_path = os.path.join(self.data_dir, img_type, img_name)
-        with fits.open(img_path, memmap=False) as f:
+        img_name = self.img_names[img_type][idx][0]   # get single image name
+        with fits.open(img_name, memmap=False) as f:
             img = f[0].data   # read image into numpy array
         return np.float32(img)   # force apply float32 to resolve endian conflict
     
@@ -57,8 +55,7 @@ class ImageDataset(Dataset):
         target = tt(kappa)
 
         # apply transforms
-        if self.transforms:
-            image, target = self.transforms(image, target)
+        image, target = self.transforms(image, target)
         if self.gaus_blur:
             target = self.gaus_blur(target)
         
