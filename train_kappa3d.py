@@ -8,7 +8,7 @@ from torch import nn
 import transforms as T
 from torchvision.transforms import GaussianBlur
 from torch.utils.data import DataLoader
-from my_dataset import ImageDataset_density
+from my_dataset import ImageDataset_kappa3d
 from torch.utils.tensorboard import SummaryWriter
 
 import shutil
@@ -61,17 +61,19 @@ def create_lr_scheduler(optimizer,
 
 
 def main(args):
+    shear_zslices = args.shear_z
+    kappa_zslices = args.kappa_z
 
     # prepare train and validation datasets; augment data with flip & rotations; add noise
     if args.gaus_blur == True:
         target_gb = GaussianBlur(kernel_size=5, sigma=2.0)
     else:
         target_gb = None
-    train_data = ImageDataset_density(catalog=os.path.join(args.dir, 'train.ecsv'), 
+    train_data = ImageDataset_kappa3d(catalog=os.path.join(args.dir, 'train.ecsv'), 
                                       z_cat=args.zcat, 
                                       n_galaxy=args.n_galaxy, 
-                                      lens_zslices=[10], 
-                                      src_zslices=[15], 
+                                      shear_zslices=shear_zslices, 
+                                      kappa_zslices=kappa_zslices, 
                                       transforms=T.Compose([
                                           T.KS_rec(activate=args.ks), 
                                           T.RandomHorizontalFlip(prob=0.5), 
@@ -80,24 +82,24 @@ def main(args):
                                           T.RandomCrop(size=512)
                                       ]), 
                                       gaus_blur=target_gb)
-    val_data = ImageDataset_density(catalog=os.path.join(args.dir, 'validation.ecsv'), 
+    val_data = ImageDataset_kappa3d(catalog=os.path.join(args.dir, 'validation.ecsv'), 
                                     z_cat=args.zcat, 
                                     n_galaxy=args.n_galaxy, 
-                                    lens_zslices=[10], 
-                                    src_zslices=[15], 
+                                    shear_zslices=shear_zslices, 
+                                    kappa_zslices=kappa_zslices, 
                                     transforms=T.Compose([
                                         T.KS_rec(activate=args.ks), 
                                         T.RandomCrop(size=512)
                                     ]), 
                                     gaus_blur=target_gb)
     # prepare train and validation dataloaders
-    loader_args = dict(batch_size=args.batch_size, num_workers=2, pin_memory=True)
+    loader_args = dict(batch_size=args.batch_size, num_workers=1, pin_memory=True)
     train_loader = DataLoader(train_data, shuffle=True, **loader_args)
     val_loader = DataLoader(val_data, shuffle=True, drop_last=True, **loader_args)
     print('loader initialized.')
 
     # initialize UNet model
-    in_channels = int(sum([args.shear*2, args.kappa, args.ks])) + 1
+    in_channels = int(sum([len(shear_zslices)*2, args.ks*len(shear_zslices)]))
     print('in_channels =', in_channels)
     model = u2net_full(in_ch=in_channels)
 
@@ -247,14 +249,16 @@ def get_args():
     parser.add_argument("-e", "--epochs", default=128, type=int, help='number of total epochs to train')
     parser.add_argument("-b", "--batch-size", default=32, type=int, help='batch size')
     parser.add_argument("--lr", default=1e-4, type=float, help='initial learning rate')
+
+    parser.add_argument("--shear-z", default=[36], help='list of shear z slices for input')
+    parser.add_argument("--kappa-z", default=[36], help='list of kappa z slices to predict')
+
     parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
     parser.add_argument("--ks", default=False, action='store_true', help='predict kappa using KS deconvolution and make this an extra channel')
-    parser.add_argument("--shear", default=False, action='store_true', help='use shear with halo to predict density')
-    parser.add_argument("--kappa", default=False, action='store_true', help='use kappa with halo to predict density')
     parser.add_argument("--loss-mode", default='native', type=str, choices=['native', 'gaus'], help='loss function mode')
     parser.add_argument("--loss-fn", default='Huber', type=str, choices=['MSE', 'Huber'], help='loss function: MSE or Huberloss')
     parser.add_argument("--huber-delta", default=50, type=float, help='delta value for Huberloss')
-    parser.add_argument("--weight-decay", default=1e-4, type=float, help='weight decay for AdamW optimizer')
+    parser.add_argument("--weight-decay", default=1e-2, type=float, help='weight decay for AdamW optimizer')
     parser.add_argument("--param-count", default=False, action='store_true', help='show model parameter count summary')
     
     return parser.parse_args()
