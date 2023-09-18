@@ -133,13 +133,13 @@ class KS_rec(object):
         elif self.activate == 'add':
             # perdict kappa using KS and add it as a 3rd channel to gamma
             # if ks add: image shape = torch.Size([3, 512, 512]); last channel is ks map
-            ks_kappa = self.shear_rec(-image[0], image[1])   # the negative sign is important
+            ks_kappa = self.shear_rec(image[0], image[1])
             image = torch.concat((image, ks_kappa.unsqueeze(0)), dim=0)
             return image, target
             
         elif self.activate == 'only':
             # perdict kappa using KS and remove shear information
             # if ks only: image shape = torch.Size([1, 512, 512])
-            ks_kappa = self.shear_rec(-image[0], image[1])   # the negative sign is important
-            image = ks_kappa
+            ks_kappa = self.shear_rec(image[0], image[1])
+            image = ks_kappa.unsqueeze(0)
             return image, target
