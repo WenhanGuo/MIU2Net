@@ -33,7 +33,8 @@ def main(args):
                              n_galaxy=args.n_galaxy, 
                              transforms=T.Compose([
                                  T.KS_rec(activate=args.ks), 
-                                 T.RandomCrop(size=512)
+                                 T.RandomCrop(size=512), 
+                                 T.Wiener(activate=args.wiener)
                                  ]), 
                              gaus_blur=shear_gb
                              )
@@ -72,6 +73,7 @@ def get_args():
     parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/data_1024_2d', type=str, help='data directory')
     parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
     parser.add_argument("--ks", default='off', type=str, choices=['off', 'add', 'only'], help='KS93 deconvolution (no KS, KS as an extra channel, no shear and KS only)')
+    parser.add_argument("--wiener", default='off', type=str, choices=['off', 'add', 'only'], help='Wiener reconstruction')
     return parser.parse_args()
 
 
