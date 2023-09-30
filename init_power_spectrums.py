@@ -9,14 +9,15 @@ import pandas as pd
 import os
 
 # Create the covariance matrix, assumed to be diagonal
-CovMat = np.ones((512, 512)) * (0.1951**2)   # std = 0.1951 for 50 galaxies per arcmin^2
+# CovMat = np.ones((512, 512)) * (0.1951**2)   # std = 0.1951 for 50 galaxies per arcmin^2
+CovMat = np.ones((512, 512)) * (0.309**2)   # std = 0.1951 for 50 galaxies per arcmin^2
 
 # Create the mass mapping structure and initialise it
 M = massmap2d(name='mass')
 M.init_massmap(nx=512, ny=512)
 
 p_noise = M.get_noise_powspec(CovMat=CovMat, nsimu=1000)
-fits.writeto('noise_power_spectrum.fits', data=p_noise, overwrite=False)
+fits.writeto('noise_power_spectrum_g20.fits', data=p_noise, overwrite=False)
 
 # %%
 catalog = '/Users/danny/Desktop/WL/data_512/train.csv'
