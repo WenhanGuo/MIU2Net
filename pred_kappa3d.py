@@ -39,9 +39,11 @@ def main(args):
                                      kappa_zslices=kappa_zslices, 
                                      transforms=T.Compose([
                                          T.KS_rec(activate=args.ks), 
-                                         T.RandomCrop(size=512)
+                                         T.RandomCrop(size=512), 
+                                         T.Wiener(activate=args.wiener)
                                          ]), 
-                                     gaus_blur=target_gb)
+                                     gaus_blur=target_gb
+                                     )
     test_data = Subset(test_data, np.arange(args.num))
     test_dataloader = DataLoader(test_data, shuffle=False, batch_size=1, num_workers=2)
 
@@ -82,6 +84,7 @@ def get_args():
     parser.add_argument("--kappa-z", default=[0], help='list of kappa z slices to predict')
     parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
     parser.add_argument("--ks", default='off', type=str, choices=['off', 'add', 'only'], help='KS93 deconvolution (no KS, KS as an extra channel, no shear and KS only)')
+    parser.add_argument("--wiener", default='off', type=str, choices=['off', 'add', 'only'], help='Wiener reconstruction')
     return parser.parse_args()
 
 

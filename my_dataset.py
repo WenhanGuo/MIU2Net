@@ -99,19 +99,17 @@ class ImageDataset_kappa3d(Dataset):
     
 
     def __getitem__(self, idx):
-        tt = T.ToTensor()
-        gn = T.AddGaussianNoise(n_galaxy=self.n_galaxy)
         # read in images
         gamma1 = self.read_data(idx, img_type='gamma1')
         gamma2 = self.read_data(idx, img_type='gamma2')
-        gamma1, gamma2 = gn(tt(gamma1)), gn(tt(gamma2))
-
         kappa = self.read_data(idx, img_type='kappa')
-        kappa = tt(kappa)
 
         # assemble image cube and target cube
+        tt = T.ToTensor()
+        gn = T.AddGaussianNoise(n_galaxy=self.n_galaxy)
+        gamma1, gamma2 = gn(tt(gamma1)), gn(tt(gamma2))
         image = torch.concat([gamma1, gamma2], dim=0)
-        target = kappa
+        target = tt(kappa)
 
         # apply transforms
         image, target = self.transforms(image, target)
