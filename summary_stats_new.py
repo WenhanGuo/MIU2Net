@@ -233,3 +233,26 @@ plt.xlabel('arbitrary')
 plt.legend()
 
 # %%
+def draw_pix2pix(pred, true, label):
+    fpred = sorted(pred.flatten())
+    ftrue = sorted(true.flatten())
+    stack = np.stack((ftrue, fpred), axis=1)
+    plt.plot(stack[:, 0], stack[:, 1], label=label)
+
+plt.figure(figsize=(6, 6))
+draw_pix2pix(pred, true, label='ML')
+draw_pix2pix(ks, true, label='KS')
+draw_pix2pix(wiener, true, label='Wiener')
+draw_pix2pix(ksr5, true, label='sparse5')
+draw_pix2pix(k1r5, true, label='MCALens')
+plt.axline((0, 0), slope=1, linestyle='--', c='r', alpha=0.7)
+
+plt.title('flattened pix to pix comparison', fontsize=16)
+plt.xlim(min(ftrue)-0.05, max(ftrue)+0.05)
+plt.ylim(min(ftrue)-0.05, max(ftrue)+0.05)
+plt.ylabel(r'predicted $\hat{\kappa}$ pixel intensity')
+plt.xlabel(r'true $\kappa$ pixel intensity')
+ax.set_aspect('equal', adjustable='box')
+plt.legend()
+
+# %%
