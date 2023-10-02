@@ -79,21 +79,23 @@ def main(args):
     train_data = ImageDataset(catalog=os.path.join(args.dir, 'train.ecsv'), 
                               n_galaxy=args.n_galaxy, 
                               transforms=T.Compose([
-                                  T.KS_rec(activate=args.ks), 
+                                  T.KS_rec(args), 
                                   T.RandomHorizontalFlip(prob=0.5), 
                                   T.RandomVerticalFlip(prob=0.5), 
                                   T.ContinuousRotation(degrees=180), 
                                   T.RandomCrop(size=512), 
-                                  T.Wiener(activate=args.wiener)
+                                  T.Wiener(args), 
+                                  T.sparse(args)
                                   ]), 
                               gaus_blur=shear_gb
                               )
     val_data = ImageDataset(catalog=os.path.join(args.dir, 'validation.ecsv'), 
                             n_galaxy=args.n_galaxy, 
                             transforms=T.Compose([
-                                T.KS_rec(activate=args.ks), 
+                                T.KS_rec(args), 
                                 T.RandomCrop(size=512), 
-                                T.Wiener(activate=args.wiener)
+                                T.Wiener(args), 
+                                T.sparse(args)
                                 ]), 
                             gaus_blur=shear_gb
                             )
@@ -103,15 +105,13 @@ def main(args):
     val_loader = DataLoader(val_data, shuffle=True, drop_last=True, **loader_args)
 
     # initialize UNet model
-    if args.ks == 'add' and args.wiener == 'add':
-        in_channels = 4
-    elif args.ks == 'add' or args.wiener == 'add':
-        in_channels = 3
-    elif args.ks == 'only' or args.wiener == 'only':
-        in_channels = 1
-    else:
-        in_channels = 2
-    
+    in_channels = 2
+    if args.ks == 'add':
+        in_channels += 1
+    if args.wiener == 'add':
+        in_channels += 1
+    if args.sparse == 'add':
+        in_channels += 1
     print('in_channels =', in_channels)
     model = u2net_full(in_ch=in_channels)
 
@@ -129,15 +129,6 @@ def main(args):
     elif args.loss_fn == 'Huber':
         loss_fn = nn.HuberLoss(delta=args.huber_delta)
     loss_fn = loss_fn.to(device)
-
-    # # setting gaussian blur parameters for gaus mode loss function; not used if args.loss_mode == native
-    # blur1 = GaussianBlur(kernel_size=5, sigma=(2.0, 3.0))
-    # blur2 = GaussianBlur(kernel_size=11, sigma=(2.0, 3.0))
-    # blur3 = GaussianBlur(kernel_size=21, sigma=(4.0, 6.0))
-    # blur4 = GaussianBlur(kernel_size=41, sigma=(6.0, 8.0))
-    # blur5 = GaussianBlur(kernel_size=91, sigma=(12.0, 16.0))
-    # blur6 = GaussianBlur(kernel_size=151, sigma=(25.0, 30.0))
-    # blur_fns = [blur1, blur2, blur3, blur4, blur5, blur6]
 
     # setting optimizer & lr scheduler
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=args.lr, 
@@ -179,10 +170,6 @@ def main(args):
                     losses.insert(0, loss_targ)
                     losses_peak = [loss_fn(outputs_peak[k], kappa_peak) for k in range(len(outputs))]
                     losses_peak.insert(0, loss_targ_peak)
-                # gaus mode: based on different levels of gaussian blurred kappa
-                # elif args.loss_mode == 'gaus':
-                #     losses = [loss_fn(outputs[j+1], blur_fns[j](kappa)) for j in range(len(outputs)-1)]
-                #     losses.insert(0, loss_targ)
                 
                 train_step_loss = sum(losses) + sum(losses_peak) * 3
 
@@ -211,7 +198,7 @@ def main(args):
         
         # validation steps
         model.eval()
-        val_loss, val_peak_loss, val_step_loss = 0.0, 0.0, 0.0
+        val_loss, val_peak_loss = 0.0, 0.0
         with torch.no_grad():
             for gamma, kappa in val_loader:
                 gamma = gamma.to(device, memory_format=torch.channels_last)
@@ -260,9 +247,10 @@ def main(args):
                                             'side5':last_w[4],
                                             'side6':last_w[5]}, global_step=i+1)
         writer.add_scalars("val_loss", {'total_step_loss':(val_step_loss/len(val_loader)).item(), 
-                                        'base loss':val_loss.item(), 
-                                        'peak loss':val_peak_loss.item()}, global_step=i+1)
+                                        'base loss':(val_loss/len(val_loader)).item(), 
+                                        'peak loss':(val_peak_loss/len(val_loader)).item()}, global_step=i+1)
         writer.add_scalar("lr", curr_lr, global_step=i+1)
+
         # save model for every best loss epoch
         if not best_loss:
             best_loss = val_step_loss
@@ -288,6 +276,7 @@ def get_args():
     parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
     parser.add_argument("--ks", default='off', type=str, choices=['off', 'add', 'only'], help='KS93 deconvolution (no KS, KS as an extra channel, no shear and KS only)')
     parser.add_argument("--wiener", default='off', type=str, choices=['off', 'add', 'only'], help='Wiener reconstruction')
+    parser.add_argument("--sparse", default='off', type=str, choices=['off', 'add', 'only'], help='sparse reconstruction')
     parser.add_argument("--loss-mode", default='native', type=str, choices=['native', 'gaus'], help='loss function mode')
     parser.add_argument("--loss-fn", default='Huber', type=str, choices=['MSE', 'Huber'], help='loss function: MSE or Huberloss')
     parser.add_argument("--huber-delta", default=50, type=float, help='delta value for Huberloss')

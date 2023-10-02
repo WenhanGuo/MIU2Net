@@ -5,7 +5,7 @@ import random
 import numpy as np
 from scipy.fft import fft2, ifft2
 from typing import Sequence
-from my_cosmostat.astro.wl.mass_mapping import massmap2d
+from my_cosmostat.astro.wl.mass_mapping import massmap2d, shear_data
 from astropy.io import fits
 
 
@@ -99,6 +99,7 @@ class AddGaussianNoise(object):
         theta_G = 0.205   # pixel side length in arcmin (gaussian smoothing window)
         variance = (sigma_e**2 / 2) / (theta_G**2 * self.n_galaxy)
         self.std = np.sqrt(variance)
+        print('shear noise std =', self.std)
 
     def __call__(self, image):
         # image = image + np.random.normal(loc=self.mean, scale=self.std, size=image.shape)
@@ -112,21 +113,10 @@ class KS_rec(object):
     """
     reconstruct kappa map from shear using Kaiser-Squires deconvolution.
     """
-    def __init__(self, activate=False):
-        self.activate = activate
+    def __init__(self, args):
+        self.activate = args.ks
         self.M = massmap2d(name='mass')
         self.M.init_massmap(nx=1024, ny=1024)
-    
-    # def shear_rec(self, shear1, shear2):
-    #     N_grid = shear1.shape[0]
-    #     theta = torch.linspace(-N_grid+1, N_grid-1, 2*N_grid-1, device=shear1.device)
-    #     theta_x, theta_y = torch.meshgrid([theta, theta], indexing='ij')
-    #     D_starkernel = -1. / (theta_x + 1j*theta_y) ** 2
-    #     D_starkernel[N_grid-1, N_grid-1] = 0
-    #     y = torch.fft.ifftn(torch.fft.fftn(D_starkernel, s=(3*N_grid-2, 3*N_grid-2)) * torch.fft.fftn(shear1 + 1j*shear2, s=(3*N_grid-2, 3*N_grid-2)))
-    #     y = y.real / torch.tensor([np.pi], device=shear1.device)
-    #     y = y[N_grid-1:2*N_grid-1, N_grid-1:2*N_grid-1]
-    #     return y
 
     def shear_rec(self, shear1, shear2):
         ks =  self.M.g2k(shear1, shear2)
@@ -161,10 +151,13 @@ class Wiener(object):
     """
     reconstruct kappa map from shear using Wiener filtering.
     """
-    def __init__(self, activate=False):
-        self.activate = activate
+    def __init__(self, args):
+        self.activate = args.wiener
         self.p_signal = fits.open('./signal_power_spectrum.fits')[0].data
-        self.p_noise = fits.open('./noise_power_spectrum.fits')[0].data
+        if args.n_galaxy == 50:
+            self.p_noise = fits.open('./noise_power_spectrum_g50.fits')[0].data
+        elif args.n_galaxy == 20:
+            self.p_noise = fits.open('./noise_power_spectrum_g20.fits')[0].data
         # Create the cosmostat mass mapping structure and initialize it
         self.M = massmap2d(name='mass')
         self.M.init_massmap(nx=512, ny=512)
@@ -189,4 +182,48 @@ class Wiener(object):
             wf_kappa = np.float32(wf_kappa)
             # image = wf_kappa.unsqueeze(0)
             image = np.expand_dims(wf_kappa, axis=0)
+            return image, target
+
+
+class sparse(object):
+    """
+    reconstruct kappa map from shear using sparse reconstruction.
+    """
+    def __init__(self, args):
+        self.activate = args.sparse
+        self.M = massmap2d(name='mass')
+        self.M.init_massmap(nx=512, ny=512)
+        self.D = shear_data()
+        self.D.nx, self.D.ny = 512, 512
+
+        sigma_e = 0.4   # rms amplitude of the intrinsic ellipticity distribution
+        theta_G = 0.205   # pixel side length in arcmin (gaussian smoothing window)
+        variance = (sigma_e**2 / 2) / (theta_G**2 * args.n_galaxy)
+        std = np.sqrt(variance)
+
+        # Create the covariance matrix, assumed to be diagonal
+        CovMat = np.ones((512, 512)) * (std**2)
+        self.D.Ncov = CovMat
+
+    def sparse(self, shear1, shear2):
+        self.D.g1 = shear1
+        self.D.g2 = shear2
+        # Do a sparse reconstruction with a 5 sigma detection
+        ksr5, ti = self.M.sparse_recons(InshearData=self.D, 
+                                        UseNoiseRea=False, 
+                                        niter=1, 
+                                        Nsigma=5, 
+                                        ThresCoarse=False, 
+                                        Inpaint=False)
+        return ksr5, ti
+
+    def __call__(self, image, target):
+        if self.activate == 'off':
+            return image, target
+        
+        elif self.activate == 'add':
+            sp_kappa, _ = self.sparse(-image[0], image[1])   # negative sign is important
+            sp_kappa = np.float32(sp_kappa)
+            # image = torch.concat((image, sp_kappa.unsqueeze(0)), dim=0)
+            image = np.concatenate([image, np.expand_dims(sp_kappa, axis=0)], axis=0)
             return image, target
