@@ -88,7 +88,8 @@ def main(args):
                                           T.RandomVerticalFlip(prob=0.5), 
                                           T.ContinuousRotation(degrees=180), 
                                           T.RandomCrop(size=512), 
-                                          T.Wiener(args)
+                                          T.Wiener(args), 
+                                          T.sparse(args)
                                       ]), 
                                       gaus_blur=target_gb)
     val_data = ImageDataset_kappa3d(catalog=os.path.join(args.dir, 'validation.ecsv'), 
@@ -99,7 +100,8 @@ def main(args):
                                     transforms=T.Compose([
                                         T.KS_rec(args), 
                                         T.RandomCrop(size=512), 
-                                        T.Wiener(args)
+                                        T.Wiener(args), 
+                                        T.sparse(args)
                                     ]), 
                                     gaus_blur=target_gb)
     # prepare train and validation dataloaders
@@ -113,6 +115,8 @@ def main(args):
     if args.ks == 'add':
         in_channels += int(len(shear_zslices))
     if args.wiener == 'add':
+        in_channels += int(len(shear_zslices))
+    if args.sparse == 'add':
         in_channels += int(len(shear_zslices))
     
     print('in_channels =', in_channels)
@@ -198,7 +202,7 @@ def main(args):
                       targ peak loss: {losses_peak[0]:.3},\n \
                       side loss: {losses[1]:.3},{losses[2]:.3},{losses[3]:.3},{losses[4]:.3},{losses[5]:.3},{losses[6]:.3},\n \
                       side peak loss: {losses_peak[1]:.3},{losses_peak[2]:.3},{losses_peak[3]:.3},{losses_peak[4]:.3},{losses_peak[5]:.3},{losses_peak[6]:.3}")
-
+        
         # validation steps
         model.eval()
         val_loss, val_peak_loss = 0.0, 0.0
@@ -287,6 +291,7 @@ def get_args():
     parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
     parser.add_argument("--ks", default='off', type=str, choices=['off', 'add', 'only'], help='KS93 deconvolution (no KS, KS as an extra channel, no shear and KS only)')
     parser.add_argument("--wiener", default='off', type=str, choices=['off', 'add', 'only'], help='Wiener reconstruction')
+    parser.add_argument("--sparse", default='off', type=str, choices=['off', 'add', 'only'], help='sparse reconstruction')
     parser.add_argument("--loss-mode", default='native', type=str, choices=['native', 'gaus'], help='loss function mode')
     parser.add_argument("--loss-fn", default='Huber', type=str, choices=['MSE', 'Huber'], help='loss function: MSE or Huberloss')
     parser.add_argument("--huber-delta", default=50, type=float, help='delta value for Huberloss')
