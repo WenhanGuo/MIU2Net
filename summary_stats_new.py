@@ -1,17 +1,13 @@
 # %%
 import numpy as np
 import scipy.ndimage as ndimage
-import astropy.io.fits as fits
 from astropy.io import fits
 import matplotlib.pyplot as plt
 from skimage.feature import peak_local_max
 from scipy.spatial import KDTree
 import matplotlib.pyplot as plt
-import seaborn as sns
-sns.set()
 
-# fname = '/Users/danny/Desktop/ks_wf_add2.fits'
-fname = '/Users/danny/Desktop/ks_wf_add2_2.fits'
+fname = '/Users/danny/Desktop/ks_wf_sp_g20.fits'
 # Open image
 with fits.open(fname) as f:
     cube = f[0].data
@@ -19,9 +15,10 @@ with fits.open(fname) as f:
     shear2 = cube[1]
     ks = cube[2]
     wiener = cube[3]
-    pred = cube[4]
-    true = cube[5]
-    res = cube[6]
+    sparse = cube[4]
+    pred = cube[5]
+    true = cube[6]
+    res = cube[7]
 
 def draw4(plot_id, data, title, scale=[-0.02, 0.05], cmap=plt.cm.jet, fontsize=18):
     plt.subplot(2, 2, plot_id)
@@ -122,7 +119,7 @@ plt.ylim(min(ftrue)-0.05, max(ftrue)+0.05)
 plt.xlabel('predicted pixel intensity')
 plt.ylabel('true pixel intensity')
 ax.set_aspect('equal', adjustable='box')
-
+plt.grid(True)
 
 # %%
 # ------------------------------------------------------------------------------
@@ -147,18 +144,18 @@ retr, reti = M.wiener(D.g1, D.g2, PowSpecSignal=p_signal, PowSpecNoise=p_noise)
 
 # %%
 # Do a sparse reconstruction with a 5 sigma detection
-ksr5,ti = M.sparse_recons(D, UseNoiseRea=False,Nsigma=5, ThresCoarse=False, Inpaint=False,Nrea=None)
+sparse,ti = M.sparse_recons(D, UseNoiseRea=False,Nsigma=5, ThresCoarse=False, Inpaint=False,Nrea=None)
 
 # %%
-k1r5,k1i5,k2r5,k2i = M.sparse_wiener_filtering(D, p_signal, Nsigma=5, Inpaint=False, Bmode=True, ktr=None)
+mcalens,k1i5,k2r5,k2i = M.sparse_wiener_filtering(D, p_signal, Nsigma=5, Inpaint=False, Bmode=True, ktr=None)
 
 # %%
 print('pred_mse =', MSE(y_true=true, y_pred=pred))
 print('ks_mse =', MSE(y_true=true, y_pred=ks))
 print('wiener_mse =', MSE(y_true=true, y_pred=wiener))
 print('retr_mse =', MSE(y_true=true, y_pred=retr))
-print('sparse5_mse =', MSE(y_true=true, y_pred=ksr5))
-print('MCALens_mse =', MSE(y_true=true, y_pred=k1r5))
+print('sparse_mse =', MSE(y_true=true, y_pred=sparse))
+print('MCALens_mse =', MSE(y_true=true, y_pred=mcalens))
 
 def rel_mse(y_true, y_pred, y_standard, thresholds, mode, binsize=0.05):
     assert mode in ['min_thres', 'bin_thres', 'max_thres']
@@ -175,14 +172,13 @@ def rel_mse(y_true, y_pred, y_standard, thresholds, mode, binsize=0.05):
         pred_to_standard.append(pred_mse / standard_mse)
     return pred_to_standard
 
-def plot_all(thresholds, true, pred, ks, wiener, retr, ksr5, k1r5, mode, title, xlabel):
+def plot_all(thresholds, true, pred, ks, wiener, retr, sparse, mcalens, mode, title, xlabel):
     plt.subplots(figsize=(10,8))
     plt.title(title, fontsize=18)
     plt.plot(thresholds, rel_mse(true, pred, ks, thresholds, mode=mode), label=r'MSE$_{\rm{ML}}$ / MSE$_{\rm{KS}}$')
     plt.plot(thresholds, rel_mse(true, pred, wiener, thresholds, mode=mode), label=r'MSE$_{\rm{ML}}$ / MSE$_{\rm{wiener}}$')
-    # plt.plot(thresholds, rel_mse(true, pred, retr, thresholds, mode=mode), label=r'MSE$_{\rm{ML}}$ / MSE$_{\rm{retr}}$')
-    plt.plot(thresholds, rel_mse(true, pred, ksr5, thresholds, mode=mode), label=r'MSE$_{\rm{ML}}$ / MSE$_{\rm{sparse5}}$')
-    plt.plot(thresholds, rel_mse(true, pred, k1r5, thresholds, mode=mode), label=r'MSE$_{\rm{ML}}$ / MSE$_{\rm{MCALens}}$')
+    plt.plot(thresholds, rel_mse(true, pred, sparse, thresholds, mode=mode), label=r'MSE$_{\rm{ML}}$ / MSE$_{\rm{sparse5}}$')
+    plt.plot(thresholds, rel_mse(true, pred, mcalens, thresholds, mode=mode), label=r'MSE$_{\rm{ML}}$ / MSE$_{\rm{MCALens}}$')
     plt.xlabel(xlabel)
     plt.axhline(y = 1.0, color='r', linestyle='--', alpha=0.7)
     plt.axvspan(true.min(), sorted(true.flatten())[259522], alpha=0.15)
@@ -192,9 +188,9 @@ def plot_all(thresholds, true, pred, ks, wiener, retr, ksr5, k1r5, mode, title, 
     plt.legend(loc='upper left')
 
 thresholds = np.arange(start=-0.035, stop=0.4, step=0.005)
-plot_all(thresholds, true, pred, ks, wiener, retr, ksr5, k1r5, mode='min_thres', title='MSE ratio (min threshold)', xlabel=r'$\kappa_{\rm{truth}} > X$')
-plot_all(thresholds, true, pred, ks, wiener, retr, ksr5, k1r5, mode='max_thres', title='MSE ratio (max threshold)', xlabel=r'$\kappa_{\rm{truth}} < X$')
-plot_all(thresholds, true, pred, ks, wiener, retr, ksr5, k1r5, mode='bin_thres', title='MSE ratio (bin threshold)', xlabel=r'$X < \kappa_{\rm{truth}} < X + 0.05$')
+plot_all(thresholds, true, pred, ks, wiener, retr, sparse, mcalens, mode='bin_thres', title='MSE ratio (bin threshold)', xlabel=r'$X < \kappa_{\rm{truth}} < X + 0.05$')
+plot_all(thresholds, true, pred, ks, wiener, retr, sparse, mcalens, mode='min_thres', title='MSE ratio (bin threshold)', xlabel=r'$X < \kappa_{\rm{truth}} < X + 0.05$')
+plot_all(thresholds, true, pred, ks, wiener, retr, sparse, mcalens, mode='max_thres', title='MSE ratio (bin threshold)', xlabel=r'$X < \kappa_{\rm{truth}} < X + 0.05$')
 
 # %%
 def draw6(plot_id, data, title, scale=[-0.02, 0.05], cmap=plt.cm.jet, fontsize=18):
@@ -209,28 +205,23 @@ draw6(1, true, 'True', scale=[true.min(), true.max()/3], cmap='viridis')
 draw6(2, pred, 'Hybrid-ML', scale=[true.min(), true.max()/3], cmap='viridis')
 draw6(3, ks, 'KS Deconvolution', scale=[true.min(), true.max()/3], cmap='viridis')
 draw6(4, wiener, 'Wiener Filtering', scale=[true.min(), true.max()/3], cmap='viridis')
-draw6(5, ksr5, 'Sparse Recovery', scale=[true.min(), true.max()/3], cmap='viridis')
-draw6(6, k1r5, 'MCALens', scale=[true.min(), true.max()/3], cmap='viridis')
+draw6(5, sparse, 'Sparse Recovery', scale=[true.min(), true.max()/3], cmap='viridis')
+draw6(6, mcalens, 'MCALens', scale=[true.min(), true.max()/3], cmap='viridis')
 
 cbar(cax=plt.axes([0.88, 0.08, 0.04, 0.8]))
 
 # %%
-p_signal = im_isospec(true)
-p_pred = im_isospec(pred - true)
-p_ks = im_isospec(ks - true)
-p_wiener = im_isospec(wiener - true)
-p_sparse = im_isospec(ksr5 - true)
-p_mcalens = im_isospec(k1r5 - true)
+def save_cube(true, ml, ks, wiener, sparse, mcalens):
+    true1 = np.expand_dims(true, axis=0)
+    ml1 = np.expand_dims(ml, axis=0)
+    ks1 = np.expand_dims(ks, axis=0)
+    wiener1 = np.expand_dims(wiener, axis=0)
+    sparse1 = np.expand_dims(sparse, axis=0)
+    mcalens1 = np.expand_dims(mcalens, axis=0)
+    c = np.concatenate([true1, ml1, ks1, wiener1, sparse1, mcalens1])
+    fits.writeto('/Users/danny/Desktop/master_cube.fits', data=c, overwrite=False)
 
-plt.plot(p_pred / p_signal, label='pred')
-plt.plot(p_wiener / p_signal, label='wiener')
-plt.plot(p_sparse / p_signal, label='sparse')
-plt.plot(p_mcalens / p_signal, label='mcalens')
-plt.ylim(0, 1.2)
-plt.xlim(1, 50)
-plt.ylabel(r'$P_\Delta \, / \, P_{\rm{truth}}$')
-plt.xlabel('arbitrary')
-plt.legend()
+save_cube(true, pred, ks, wiener, sparse, mcalens)
 
 # %%
 def draw_pix2pix(pred, true, label):
@@ -243,8 +234,8 @@ plt.figure(figsize=(6, 6))
 draw_pix2pix(pred, true, label='ML')
 draw_pix2pix(ks, true, label='KS')
 draw_pix2pix(wiener, true, label='Wiener')
-draw_pix2pix(ksr5, true, label='sparse5')
-draw_pix2pix(k1r5, true, label='MCALens')
+draw_pix2pix(sparse, true, label='sparse5')
+draw_pix2pix(mcalens, true, label='MCALens')
 plt.axline((0, 0), slope=1, linestyle='--', c='r', alpha=0.7)
 
 plt.title('flattened pix to pix comparison', fontsize=16)
@@ -253,6 +244,158 @@ plt.ylim(min(ftrue)-0.05, max(ftrue)+0.05)
 plt.ylabel(r'predicted $\hat{\kappa}$ pixel intensity')
 plt.xlabel(r'true $\kappa$ pixel intensity')
 ax.set_aspect('equal', adjustable='box')
+plt.grid(True)
+plt.legend()
+
+# %%
+# ------------------------------------------------------------------------------
+import astropy.units as u
+from scipy.stats import binned_statistic
+
+cube = fits.open('/Users/danny/Desktop/master_cube.fits')[0].data
+true = cube[0]
+ml = cube[1]
+ks = cube[2]
+wiener = cube[3]
+sparse = cube[4]
+mcalens = cube[5]
+
+# %%
+# calculate 2D power spectrum
+def pspec(img):
+
+    def my_rfft_to_fft():
+        fft_abs = np.abs(np.fft.rfftn(img))
+        fftstar_abs = fft_abs.copy()[:, -2:0:-1]
+        fftstar_abs[1::, :] = fftstar_abs[:0:-1, :]
+        return np.concatenate((fft_abs, fftstar_abs), axis=1)
+    
+    fft = np.fft.fftshift(my_rfft_to_fft())
+    ps2D = np.power(fft, 2.)
+
+    return ps2D
+
+
+# calculate radial average (1D ps) from 2D power spectrum
+def radial_pspec(ps2D, binsize=1.0, logspacing=False):
+
+    def make_radial_arrays(shape):
+        y_center = np.floor(shape[0] / 2.).astype(int)
+        x_center = np.floor(shape[1] / 2.).astype(int)
+        y = np.arange(-y_center, shape[0] - y_center)
+        x = np.arange(-x_center, shape[1] - x_center)
+        yy, xx = np.meshgrid(y, x, indexing='ij')
+        return yy, xx
+
+    def make_radial_freq_arrays(shape):
+        yfreqs = np.fft.fftshift(np.fft.fftfreq(shape[0]))
+        xfreqs = np.fft.fftshift(np.fft.fftfreq(shape[1]))
+        yy_freq, xx_freq = np.meshgrid(yfreqs, xfreqs, indexing='ij')
+        return yy_freq[::-1], xx_freq[::-1]
+    
+    yy, xx = make_radial_arrays(ps2D.shape)
+    dists = np.sqrt(yy**2 + xx**2)
+    nbins = int(np.round(dists.max() / binsize) + 1)
+    yy_freq, xx_freq = make_radial_freq_arrays(ps2D.shape)
+    freqs_dist = np.sqrt(yy_freq**2 + xx_freq**2)
+    zero_freq_val = freqs_dist[np.nonzero(freqs_dist)].min() / 2.
+    freqs_dist[freqs_dist == 0] = zero_freq_val
+
+    max_bin = 0.5
+    min_bin = 1.0 / min(ps2D.shape)
+
+    if logspacing:
+        bins = np.logspace(np.log10(min_bin), np.log10(max_bin), nbins + 1)
+    else:
+        bins = np.linspace(min_bin, max_bin, nbins + 1)
+
+    dist_arr = freqs_dist
+
+    finite_mask = np.isfinite(ps2D)
+    ps1D, bin_edge, cts = binned_statistic(dist_arr[finite_mask].ravel(),
+                                           ps2D[finite_mask].ravel(),
+                                           bins=bins,
+                                           statistic=np.nanmean)
+
+    bin_cents = (bin_edge[1:] + bin_edge[:-1]) / 2.
+
+    return bin_cents, ps1D
+
+
+# calculate 1D power spectrum from image
+def P(img, logspacing=False):
+    ps2D = pspec(img=img)
+    freqs, ps1D = radial_pspec(ps2D=ps2D, binsize=1.0, logspacing=logspacing)
+    freqs = freqs / u.pix
+    return freqs, ps1D
+
+# %%
+def pix_to_arcmin(pixel_value):
+    '''
+    Convert a value in pixel units to the given angular unit.
+    '''
+    pixel_scale = 1.75*60/512 * u.arcmin / u.pix
+    return pixel_value * pixel_scale
+
+
+def spatial_freq_unit_conversion(pixel_value):
+    '''
+    Same as pix_to_arcmin, but handles the inverse units.
+    Feed in as the inverse of the value, and then inverse again so that
+    the unit conversions will work.
+    '''
+    return 1 / pix_to_arcmin(1 / pixel_value)
+
+
+def plot_pspec(xvals, ps1D, logy, label, c=None):
+    xvals = spatial_freq_unit_conversion(xvals).value
+    plt.xscale('log')
+    if logy == True:
+        plt.yscale('log')
+    plt.plot(xvals, ps1D, c=c, label=label)
+
+# %%
+# plot 1D power spectrums for truth & all recovery methods
+f_true, p_true = P(img=true, logspacing=False)
+f_ml, p_ml = P(img=ml, logspacing=False)
+f_ks, p_ks = P(img=ks, logspacing=False)
+f_wiener, p_wiener = P(img=wiener, logspacing=False)
+f_sparse, p_sparse = P(img=sparse, logspacing=False)
+f_mcalens, p_mcalens = P(img=mcalens, logspacing=False)
+
+plt.figure(figsize=(8, 6))
+plt.title('1D Power Spectrum')
+plot_pspec(xvals=f_true, ps1D=p_true, logy=True, label='true', c='k')
+plot_pspec(xvals=f_ml, ps1D=p_ml, logy=True, label='ml')
+plot_pspec(xvals=f_ks, ps1D=p_ks, logy=True, label='ks')
+plot_pspec(xvals=f_wiener, ps1D=p_wiener, logy=True, label='wiener')
+plot_pspec(xvals=f_sparse, ps1D=p_sparse, logy=True, label='sparse')
+plot_pspec(xvals=f_mcalens, ps1D=p_mcalens, logy=True, label='mcalens')
+plt.xlabel("Spatial Frequency (1 / arcmin)")
+plt.ylabel(r"$P(\kappa)$")
+plt.grid(True)
+plt.legend()
+
+# %%
+# plot powerspec(true - pred) / powerspec(true)
+f_res_ml, p_res_ml = P(img=true-ml, logspacing=False)
+f_res_ks, p_res_ks = P(img=true-ks, logspacing=False)
+f_res_wiener, p_res_wiener = P(img=true-wiener, logspacing=False)
+f_res_sparse, p_res_sparse = P(img=true-sparse, logspacing=False)
+f_res_mcalens, p_res_mcalens = P(img=true-mcalens, logspacing=False)
+
+plt.figure(figsize=(8, 6))
+plt.title(r"Normalized Power Spectrum $P_\Delta$ of Residual $\hat{\kappa} - \kappa_{\rm{truth}}$")
+plot_pspec(xvals=f_res_ml, ps1D=p_res_ml/p_true, logy=False, label='ml')
+plot_pspec(xvals=f_res_ks, ps1D=p_res_ks/p_true, logy=False, label='ks')
+plot_pspec(xvals=f_res_wiener, ps1D=p_res_wiener/p_true, logy=False, label='wiener')
+plot_pspec(xvals=f_res_sparse, ps1D=p_res_sparse/p_true, logy=False, label='sparse')
+plot_pspec(xvals=f_res_mcalens, ps1D=p_res_mcalens/p_true, logy=False, label='mcalens')
+plt.xlabel("Spatial Frequency (1 / arcmin)")
+plt.ylabel(r"$P_\Delta \, / \, P_{\rm{true}}$")
+plt.xlim(xmin=10**-1.7)
+plt.ylim(0, 1.2)
+plt.grid(True)
 plt.legend()
 
 # %%
