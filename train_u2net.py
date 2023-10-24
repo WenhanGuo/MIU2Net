@@ -1,6 +1,6 @@
 #! -*- coding: utf-8 -*-
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1, 4'
 
 from model_u2net import u2net_full
 import torch
@@ -60,7 +60,7 @@ def create_lr_scheduler(optimizer,
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=f)
 
 
-def generate_peak_mask(args, target, thres_std=0.5):
+def generate_peak_mask(args, target, thres_std=1):
         thresholds = torch.mean(target, dim=(1,2,3)) + thres_std * torch.std(target, dim=(1,2,3))
         thresholds = thresholds.view(args.batch_size, 1, 1, 1)
         target_mask = target > thresholds   # mask shape: (batchsize, 1, 512, 512)
@@ -155,7 +155,7 @@ def main(args):
             # gamma shape: (batchsize, 2, 512, 512)
             kappa = kappa.to(device, memory_format=torch.channels_last)
             # kappa shape: (batchsize, 1, 512, 512)
-            kappa_mask, outputs_mask = generate_peak_mask(args, target=kappa, thres_std=0.5)
+            kappa_mask, outputs_mask = generate_peak_mask(args, target=kappa, thres_std=1)
             kappa_peak = kappa * kappa_mask
 
             with torch.cuda.amp.autocast(enabled=scaler is not None):
@@ -171,7 +171,7 @@ def main(args):
                     losses_peak = [loss_fn(outputs_peak[k], kappa_peak) for k in range(len(outputs))]
                     losses_peak.insert(0, loss_targ_peak)
                 
-                train_step_loss = sum(losses) + sum(losses_peak) * 3
+                train_step_loss = sum(losses) + sum(losses_peak) * 5
 
             # optimizer step
             optimizer.zero_grad()
@@ -203,13 +203,13 @@ def main(args):
             for gamma, kappa in val_loader:
                 gamma = gamma.to(device, memory_format=torch.channels_last)
                 kappa = kappa.to(device, memory_format=torch.channels_last)
-                kappa_mask, _ = generate_peak_mask(args, target=kappa, thres_std=0.5)
+                kappa_mask, _ = generate_peak_mask(args, target=kappa, thres_std=1)
                 kappa_peak = kappa * kappa_mask
                 outputs = model(gamma)
                 outputs_peak = outputs * kappa_mask
                 val_loss += loss_fn(outputs, kappa)
                 val_peak_loss += loss_fn(outputs_peak, kappa_peak)
-                val_step_loss = val_loss + val_peak_loss * 3
+                val_step_loss = val_loss + val_peak_loss * 5
 
         # printing final 1x1 convolution layer (learned weights for each side outputs)
         for name, param in model.named_parameters():
