@@ -26,8 +26,6 @@ class ToTensor(object):
             return F.to_tensor(image), F.to_tensor(target)
         else:
             return F.to_tensor(image)
-    # def __call__(self, image):
-    #     return F.to_tensor(image)
 
 
 class RandomHorizontalFlip(object):
@@ -99,7 +97,7 @@ class AddGaussianNoise(object):
         theta_G = 0.205   # pixel side length in arcmin (gaussian smoothing window)
         variance = (sigma_e**2 / 2) / (theta_G**2 * self.n_galaxy)
         self.std = np.sqrt(variance)
-        print('shear noise std =', self.std)
+        # print('shear noise std =', self.std)
 
     def __call__(self, image):
         # image = image + np.random.normal(loc=self.mean, scale=self.std, size=image.shape)
@@ -117,6 +115,7 @@ class KS_rec(object):
         self.activate = args.ks
         self.M = massmap2d(name='mass')
         self.M.init_massmap(nx=1024, ny=1024)
+        print('KS initialized')
 
     def shear_rec(self, shear1, shear2):
         ks =  self.M.g2k(shear1, shear2)
@@ -161,6 +160,7 @@ class Wiener(object):
         # Create the cosmostat mass mapping structure and initialize it
         self.M = massmap2d(name='mass')
         self.M.init_massmap(nx=512, ny=512)
+        print('wiener initialized')
 
     def wiener(self, shear1, shear2):
         retr, reti = self.M.wiener(shear1, shear2, PowSpecSignal=self.p_signal, PowSpecNoise=self.p_noise)
@@ -204,6 +204,8 @@ class sparse(object):
         # Create the covariance matrix, assumed to be diagonal
         CovMat = np.ones((512, 512)) * (std**2)
         self.D.Ncov = CovMat
+
+        print('sparse initialized')
 
     def sparse(self, shear1, shear2):
         self.D.g1 = shear1
