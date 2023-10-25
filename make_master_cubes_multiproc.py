@@ -22,7 +22,7 @@ def save_cube(true, ml, ks, wiener, sparse, save_dir, save_name):
     wiener1 = np.expand_dims(wiener, axis=0)
     sparse1 = np.expand_dims(sparse, axis=0)
     c = np.concatenate([true1, ml1, ks1, wiener1, sparse1])
-    fits.writeto(os.path.join(save_dir, save_name), data=np.float32(c), overwrite=False)
+    fits.writeto(os.path.join(save_dir, save_name), data=np.float32(c), overwrite=True)
     print(f'saved cube {save_name}')
 
 

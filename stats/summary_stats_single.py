@@ -34,24 +34,7 @@ gb_mcalens = convolve(mcalens, k)
 # ### Visualize all methods and their gaussian blurs
 
 # %%
-def draw4(plot_id, data, title, scale=[-0.02, 0.05], cmap=plt.cm.jet, fontsize=18):
-    plt.subplot(2, 2, plot_id)
-    plt.imshow(data, cmap=cmap, vmin=scale[0], vmax=scale[1])
-    plt.title(f'{title}', fontsize=fontsize)
-    plt.xticks([])
-    plt.yticks([])
-
-def draw6(plot_id, data, title, scale=[-0.02, 0.05], cmap=plt.cm.jet, fontsize=18):
-    plt.subplot(2, 3, plot_id)
-    plt.imshow(data, cmap=cmap, vmin=scale[0], vmax=scale[1])
-    plt.title(f'{title}', fontsize=fontsize)
-    plt.xticks([])
-    plt.yticks([])
-
-def cbar(cax):
-    plt.tight_layout()
-    fig.subplots_adjust(right=0.87)
-    plt.colorbar(cax=cax, orientation="vertical")
+from summary_stats_func import draw4, draw6, cbar
 
 fig = plt.figure(figsize=(12,8))
 draw6(1, true, 'True', scale=[true.min(), true.max()/3], cmap='viridis')
@@ -60,7 +43,7 @@ draw6(3, ks, 'KS Deconvolution', scale=[true.min(), true.max()/3], cmap='viridis
 draw6(4, wiener, 'Wiener Filtering', scale=[true.min(), true.max()/3], cmap='viridis')
 draw6(5, sparse, 'Sparse Recovery', scale=[true.min(), true.max()/3], cmap='viridis')
 draw6(6, mcalens, 'MCALens', scale=[true.min(), true.max()/3], cmap='viridis')
-cbar(cax=plt.axes([0.88, 0.08, 0.04, 0.8]))
+cbar(fig, cax=plt.axes([0.88, 0.08, 0.04, 0.8]))
 plt.show()
 
 fig = plt.figure(figsize=(12,8))
@@ -71,7 +54,7 @@ draw6(3, gb_ks, 'GB KS Deconvolution', scale=[true.min(), true.max()/3], cmap='v
 draw6(4, gb_wiener, 'GB Wiener Filtering', scale=[true.min(), true.max()/3], cmap='viridis')
 draw6(5, gb_sparse, 'GB Sparse Recovery', scale=[true.min(), true.max()/3], cmap='viridis')
 draw6(6, gb_mcalens, 'GB MCALens', scale=[true.min(), true.max()/3], cmap='viridis')
-cbar(cax=plt.axes([0.88, 0.08, 0.04, 0.8]))
+cbar(fig, cax=plt.axes([0.88, 0.08, 0.04, 0.8]))
 plt.show()
 
 # %% [markdown]
@@ -100,7 +83,7 @@ draw4(3, gb_ml, f'Blurred Prediction ({len(matched_pcoord)} matched peaks)', sca
 plt.scatter(matched_pcoord[:, 1], matched_pcoord[:, 0], s=30, color='yellow', marker='+', linewidth=0.8)
 draw4(4, gb_true, f'Blurred True ({len(sub_tcoord)} peaks)', scale=[ml.min(), ml.max()], cmap='viridis')
 plt.scatter(sub_tcoord[:, 1], sub_tcoord[:, 0], s=30, color='yellow', marker='+', linewidth=0.8)
-cbar(cax=plt.axes([0.88, 0.08, 0.04, 0.8]))
+cbar(fig, cax=plt.axes([0.88, 0.08, 0.04, 0.8]))
 
 # %%
 def find_and_match_peak(target, pred):
@@ -246,46 +229,17 @@ plt.show()
 # ## Binned MSE Err
 
 # %%
+from summary_stats_func import plot_all_mse
 print(f'ML_mse = {MSE(y_true=true, y_pred=ml):4f}')
 print(f'KS_mse = {MSE(y_true=true, y_pred=ks):4f}')
 print(f'Wiener_mse = {MSE(y_true=true, y_pred=wiener):4f}')
 print(f'sparse_mse = {MSE(y_true=true, y_pred=sparse):4f}')
 print(f'MCALens_mse = {MSE(y_true=true, y_pred=mcalens):4f}')
 
-def rel_mse(y_true, y_pred, y_standard, thresholds, mode, binsize=0.05):
-    assert mode in ['min_thres', 'bin_thres', 'max_thres']
-    pred_to_standard = []
-    for t in thresholds:
-        if mode == 'min_thres':
-            mask = y_true > t
-        elif mode == 'bin_thres':
-            mask = (y_true > t) & (y_true < t + binsize)
-        elif mode == 'max_thres':
-            mask = y_true < t
-        pred_mse = MSE(y_true=y_true * mask, y_pred=y_pred * mask)
-        standard_mse = MSE(y_true=y_true * mask, y_pred=y_standard * mask)
-        pred_to_standard.append(pred_mse / standard_mse)
-    return pred_to_standard
-
-def plot_all(thresholds, true, ml, ks, wiener, sparse, mcalens, mode, title, xlabel):
-    plt.subplots(figsize=(10,8))
-    plt.title(title, fontsize=18)
-    plt.plot(thresholds, rel_mse(true, ml, ks, thresholds, mode=mode), label=r'MSE$_{\rm{ML}}$ / MSE$_{\rm{KS}}$')
-    plt.plot(thresholds, rel_mse(true, ml, wiener, thresholds, mode=mode), label=r'MSE$_{\rm{ML}}$ / MSE$_{\rm{wiener}}$')
-    plt.plot(thresholds, rel_mse(true, ml, sparse, thresholds, mode=mode), label=r'MSE$_{\rm{ML}}$ / MSE$_{\rm{sparse5}}$')
-    plt.plot(thresholds, rel_mse(true, ml, mcalens, thresholds, mode=mode), label=r'MSE$_{\rm{ML}}$ / MSE$_{\rm{MCALens}}$')
-    plt.xlabel(xlabel)
-    plt.axhline(y = 1.0, color='r', linestyle='--', alpha=0.7)
-    plt.axvspan(true.min(), sorted(true.flatten())[259522], alpha=0.15)
-    plt.text(x=-0.02, y=-0.05, s='99% of pixels', fontsize=16)
-    plt.axvspan(sorted(true.flatten())[259522], 0.4, color='r', alpha=0.05)
-    plt.text(x=0.2, y=-0.05, s='top 1% (peaks)', fontsize=16)
-    plt.legend(loc='upper left')
-
 thresholds = np.arange(start=-0.035, stop=0.4, step=0.005)
-plot_all(thresholds, true, ml, ks, wiener, sparse, mcalens, mode='bin_thres', title='MSE ratio (bin threshold)', xlabel=r'$X < \kappa_{\rm{truth}} < X + 0.05$')
-plot_all(thresholds, true, ml, ks, wiener, sparse, mcalens, mode='min_thres', title='MSE ratio (bin threshold)', xlabel=r'$X < \kappa_{\rm{truth}} < X + 0.05$')
-plot_all(thresholds, true, ml, ks, wiener, sparse, mcalens, mode='max_thres', title='MSE ratio (bin threshold)', xlabel=r'$X < \kappa_{\rm{truth}} < X + 0.05$')
+plot_all_mse(thresholds, true, ml, ks, wiener, sparse, mcalens, mode='bin_thres', title='MSE ratio (bin threshold)', xlabel=r'$X < \kappa_{\rm{truth}} < X + 0.05$')
+plot_all_mse(thresholds, true, ml, ks, wiener, sparse, mcalens, mode='min_thres', title='MSE ratio (bin threshold)', xlabel=r'$X < \kappa_{\rm{truth}} < X + 0.05$')
+plot_all_mse(thresholds, true, ml, ks, wiener, sparse, mcalens, mode='max_thres', title='MSE ratio (bin threshold)', xlabel=r'$X < \kappa_{\rm{truth}} < X + 0.05$')
 
 # %% [markdown]
 # ### Pixel to Pixel Comparison
@@ -297,7 +251,7 @@ def draw_pix2pix(pred, true, label):
     stack = np.stack((ftrue, fpred), axis=1)
     plt.plot(stack[:, 0], stack[:, 1], label=label)
 
-plt.figure(figsize=(6, 6))
+fig, ax = plt.subplots(figsize=(6, 6))
 draw_pix2pix(ml, true, label='ML')
 draw_pix2pix(ks, true, label='KS')
 draw_pix2pix(wiener, true, label='Wiener')
@@ -319,101 +273,7 @@ plt.legend()
 # ### Power Spectrum
 
 # %%
-# calculate 2D power spectrum
-def pspec(img):
-
-    def my_rfft_to_fft():
-        fft_abs = np.abs(np.fft.rfftn(img))
-        fftstar_abs = fft_abs.copy()[:, -2:0:-1]
-        fftstar_abs[1::, :] = fftstar_abs[:0:-1, :]
-        return np.concatenate((fft_abs, fftstar_abs), axis=1)
-    
-    fft = np.fft.fftshift(my_rfft_to_fft())
-    ps2D = np.power(fft, 2.)
-
-    return ps2D
-
-
-# calculate radial average (1D ps) from 2D power spectrum
-def radial_pspec(ps2D, binsize=1.0, logspacing=False):
-
-    def make_radial_arrays(shape):
-        y_center = np.floor(shape[0] / 2.).astype(int)
-        x_center = np.floor(shape[1] / 2.).astype(int)
-        y = np.arange(-y_center, shape[0] - y_center)
-        x = np.arange(-x_center, shape[1] - x_center)
-        yy, xx = np.meshgrid(y, x, indexing='ij')
-        return yy, xx
-
-    def make_radial_freq_arrays(shape):
-        yfreqs = np.fft.fftshift(np.fft.fftfreq(shape[0]))
-        xfreqs = np.fft.fftshift(np.fft.fftfreq(shape[1]))
-        yy_freq, xx_freq = np.meshgrid(yfreqs, xfreqs, indexing='ij')
-        return yy_freq[::-1], xx_freq[::-1]
-    
-    yy, xx = make_radial_arrays(ps2D.shape)
-    dists = np.sqrt(yy**2 + xx**2)
-    nbins = int(np.round(dists.max() / binsize) + 1)
-    yy_freq, xx_freq = make_radial_freq_arrays(ps2D.shape)
-    freqs_dist = np.sqrt(yy_freq**2 + xx_freq**2)
-    zero_freq_val = freqs_dist[np.nonzero(freqs_dist)].min() / 2.
-    freqs_dist[freqs_dist == 0] = zero_freq_val
-
-    max_bin = 0.5
-    min_bin = 1.0 / min(ps2D.shape)
-
-    if logspacing:
-        bins = np.logspace(np.log10(min_bin), np.log10(max_bin), nbins + 1)
-    else:
-        bins = np.linspace(min_bin, max_bin, nbins + 1)
-
-    dist_arr = freqs_dist
-
-    finite_mask = np.isfinite(ps2D)
-    ps1D, bin_edge, cts = binned_statistic(dist_arr[finite_mask].ravel(),
-                                           ps2D[finite_mask].ravel(),
-                                           bins=bins,
-                                           statistic=np.nanmean)
-
-    bin_cents = (bin_edge[1:] + bin_edge[:-1]) / 2.
-
-    return bin_cents, ps1D
-
-
-# calculate 1D power spectrum from image
-def P(img, logspacing=False):
-    ps2D = pspec(img=img)
-    freqs, ps1D = radial_pspec(ps2D=ps2D, binsize=1.0, logspacing=logspacing)
-    freqs = freqs / u.pix
-    return freqs, ps1D
-
-
-# %%
-def pix_to_arcmin(pixel_value):
-    '''
-    Convert a value in pixel units to the given angular unit.
-    '''
-    pixel_scale = 1.75*60/512 * u.arcmin / u.pix
-    return pixel_value * pixel_scale
-
-
-def spatial_freq_unit_conversion(pixel_value):
-    '''
-    Same as pix_to_arcmin, but handles the inverse units.
-    Feed in as the inverse of the value, and then inverse again so that
-    the unit conversions will work.
-    '''
-    return 1 / pix_to_arcmin(1 / pixel_value)
-
-
-def plot_pspec(xvals, ps1D, logy, label, c=None):
-    xvals = spatial_freq_unit_conversion(xvals).value
-    plt.xscale('log')
-    if logy == True:
-        plt.yscale('log')
-    plt.plot(xvals, ps1D, c=c, label=label)
-
-# %%
+from summary_stats_func import P, plot_pspec
 # plot 1D power spectrums for truth & all recovery methods
 f_true, p_true = P(img=true, logspacing=False)
 f_ml, p_ml = P(img=ml, logspacing=False)
@@ -458,3 +318,5 @@ plt.grid(True)
 plt.legend()
 
 
+
+# %%
