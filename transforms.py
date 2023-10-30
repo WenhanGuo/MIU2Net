@@ -3,7 +3,6 @@ from torchvision.transforms import functional as F
 from torchvision.transforms import transforms as T
 import random
 import numpy as np
-from scipy.fft import fft2, ifft2
 from typing import Sequence
 from my_cosmostat.astro.wl.mass_mapping import massmap2d, shear_data
 from astropy.io import fits
@@ -113,7 +112,7 @@ class KS_rec(object):
     """
     def __init__(self, args):
         self.activate = args.ks
-        self.M = massmap2d(name='mass')
+        self.M = massmap2d(name='mass_ks')
         self.M.init_massmap(nx=1024, ny=1024)
         print('KS initialized')
 
@@ -131,8 +130,6 @@ class KS_rec(object):
             ks_kappa = self.shear_rec(-image[0], image[1])   # negative sign is important
             ks_kappa = torch.FloatTensor(ks_kappa)
             image = torch.concat((image, ks_kappa.unsqueeze(0)), dim=0)
-            # ks_kappa = np.float32(ks_kappa)
-            # image = np.concatenate([image, np.expand_dims(ks_kappa, axis=0)], axis=0)
             return image, target
             
         elif self.activate == 'only':
@@ -158,7 +155,7 @@ class Wiener(object):
         elif args.n_galaxy == 20:
             self.p_noise = fits.open('./noise_power_spectrum_g20.fits')[0].data
         # Create the cosmostat mass mapping structure and initialize it
-        self.M = massmap2d(name='mass')
+        self.M = massmap2d(name='mass_wiener')
         self.M.init_massmap(nx=512, ny=512)
         print('wiener initialized')
 
@@ -173,7 +170,6 @@ class Wiener(object):
         elif self.activate == 'add':
             wf_kappa, _ = self.wiener(-image[0], image[1])   # negative sign is important
             wf_kappa = np.float32(wf_kappa)
-            # image = torch.concat((image, wf_kappa.unsqueeze(0)), dim=0)
             image = np.concatenate([image, np.expand_dims(wf_kappa, axis=0)], axis=0)
             return image, target
         
@@ -191,10 +187,9 @@ class sparse(object):
     """
     def __init__(self, args):
         self.activate = args.sparse
-        self.M = massmap2d(name='mass')
+        self.M = massmap2d(name='mass_sparse')
         self.M.init_massmap(nx=512, ny=512)
         self.D = shear_data()
-        self.D.nx, self.D.ny = 512, 512
 
         sigma_e = 0.4   # rms amplitude of the intrinsic ellipticity distribution
         theta_G = 0.205   # pixel side length in arcmin (gaussian smoothing window)
@@ -224,8 +219,55 @@ class sparse(object):
             return image, target
         
         elif self.activate == 'add':
-            sp_kappa, _ = self.sparse(-image[0], image[1])   # negative sign is important
+            sp_kappa, _ = self.sparse(np.float32(-image[0]), np.float32(image[1]))   # negative sign is important
             sp_kappa = np.float32(sp_kappa)
-            # image = torch.concat((image, sp_kappa.unsqueeze(0)), dim=0)
             image = np.concatenate([image, np.expand_dims(sp_kappa, axis=0)], axis=0)
+            return image, target
+
+
+class MCALens(object):
+    """
+    reconstruct kappa map from shear using MCALens reconstruction.
+    """
+    def __init__(self, args):
+        self.activate = args.mcalens
+        self.p_signal = fits.open('./signal_power_spectrum.fits')[0].data
+        self.M = massmap2d(name='mass_mcalens')
+        self.M.init_massmap(nx=512, ny=512)
+        self.D = shear_data()
+
+        sigma_e = 0.4   # rms amplitude of the intrinsic ellipticity distribution
+        theta_G = 0.205   # pixel side length in arcmin (gaussian smoothing window)
+        variance = (sigma_e**2 / 2) / (theta_G**2 * args.n_galaxy)
+        std = np.sqrt(variance)
+
+        # Create the covariance matrix, assumed to be diagonal
+        CovMat = np.ones((512, 512)) * (std**2)
+        self.D.Ncov = CovMat
+
+        print('MCALens initialized')
+
+    def mcalens(self, shear1, shear2):
+        self.D.g1 = shear1
+        self.D.g2 = shear2
+        # MCAlens reconstruction with a 5 sigma detection
+        k1r5, k1i5, k2r5, k2i = self.M.sparse_wiener_filtering(InshearData=self.D, 
+                                                               PowSpecSignal=self.p_signal,
+                                                               niter=1, 
+                                                               Nsigma=5, 
+                                                               Inpaint=False, 
+                                                               Bmode=False, 
+                                                               ktr=None)
+        return k1r5, k1i5, k2r5, k2i
+
+    def __call__(self, image, target):
+        if self.activate == 'off':
+            return image, target
+        
+        elif self.activate == 'add':
+            mca_kappa, _, _, _ = self.mcalens(np.float32(-image[0]), np.float32(image[1]))   # negative sign is important
+            # mca_kappa = torch.FloatTensor(mca_kappa)
+            mca_kappa = np.float32(mca_kappa)
+            # image = torch.concat((image, mca_kappa.unsqueeze(0)), dim=0)
+            image = np.concatenate([image, np.expand_dims(mca_kappa, axis=0)], axis=0)
             return image, target

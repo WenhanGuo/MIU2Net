@@ -1,6 +1,6 @@
 #! -*- coding: utf-8 -*-
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '5'
+os.environ['CUDA_VISIBLE_DEVICES'] = '7'
 
 from model_u2net import u2net_full
 import torch
@@ -60,7 +60,7 @@ def create_lr_scheduler(optimizer,
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=f)
 
 
-def generate_peak_mask(args, target, thres_std=0.5):
+def generate_peak_mask(args, target, thres_std=1):
         thresholds = torch.mean(target, dim=(1,2,3)) + thres_std * torch.std(target, dim=(1,2,3))
         thresholds = thresholds.view(args.batch_size, 1, 1, 1)
         target_mask = target > thresholds   # mask shape: (batchsize, 1, 512, 512)
@@ -89,7 +89,8 @@ def main(args):
                                           T.ContinuousRotation(degrees=180), 
                                           T.RandomCrop(size=512), 
                                           T.Wiener(args), 
-                                          T.sparse(args)
+                                          T.sparse(args), 
+                                          T.MCALens(args)
                                       ]), 
                                       gaus_blur=target_gb)
     val_data = ImageDataset_kappa3d(catalog=os.path.join(args.dir, 'validation.ecsv'), 
@@ -101,7 +102,8 @@ def main(args):
                                         T.KS_rec(args), 
                                         T.RandomCrop(size=512), 
                                         T.Wiener(args), 
-                                        T.sparse(args)
+                                        T.sparse(args), 
+                                        T.MCALens(args)
                                     ]), 
                                     gaus_blur=target_gb)
     # prepare train and validation dataloaders
@@ -117,6 +119,8 @@ def main(args):
     if args.wiener == 'add':
         in_channels += int(len(shear_zslices))
     if args.sparse == 'add':
+        in_channels += int(len(shear_zslices))
+    if args.mcalens == 'add':
         in_channels += int(len(shear_zslices))
     
     print('in_channels =', in_channels)
@@ -162,7 +166,7 @@ def main(args):
             # image shape: (batchsize, 3 or 4, 512, 512)
             target = target.to(device, memory_format=torch.channels_last)
             # target shape: (batchsize, 1, 512, 512)
-            target_mask, outputs_mask = generate_peak_mask(args, target=target, thres_std=0.5)
+            target_mask, outputs_mask = generate_peak_mask(args, target=target, thres_std=1)
             target_peak = target * target_mask
 
             with torch.cuda.amp.autocast(enabled=scaler is not None):
@@ -178,7 +182,7 @@ def main(args):
                     losses_peak = [loss_fn(outputs_peak[k], target_peak) for k in range(len(outputs))]
                     losses_peak.insert(0, loss_targ_peak)
                 
-                train_step_loss = sum(losses) + sum(losses_peak) * 3
+                train_step_loss = sum(losses) + sum(losses_peak) * 5
 
             # optimizer step
             optimizer.zero_grad()
@@ -210,13 +214,13 @@ def main(args):
             for image, target in val_loader:
                 image = image.to(device, memory_format=torch.channels_last)
                 target = target.to(device, memory_format=torch.channels_last)
-                target_mask, _ = generate_peak_mask(args, target=target, thres_std=0.5)
+                target_mask, _ = generate_peak_mask(args, target=target, thres_std=1)
                 target_peak = target * target_mask
                 outputs = model(image)
                 outputs_peak = outputs * target_mask
                 val_loss += loss_fn(outputs, target)
                 val_peak_loss += loss_fn(outputs_peak, target_peak)
-                val_step_loss = val_loss + val_peak_loss * 3
+                val_step_loss = val_loss + val_peak_loss * 5
 
         # printing final 1x1 convolution layer (learned weights for each side outputs)
         for name, param in model.named_parameters():
@@ -292,6 +296,7 @@ def get_args():
     parser.add_argument("--ks", default='off', type=str, choices=['off', 'add', 'only'], help='KS93 deconvolution (no KS, KS as an extra channel, no shear and KS only)')
     parser.add_argument("--wiener", default='off', type=str, choices=['off', 'add', 'only'], help='Wiener reconstruction')
     parser.add_argument("--sparse", default='off', type=str, choices=['off', 'add', 'only'], help='sparse reconstruction')
+    parser.add_argument("--mcalens", default='off', type=str, choices=['off', 'add', 'only'], help='MCALens reconstruction')
     parser.add_argument("--loss-mode", default='native', type=str, choices=['native', 'gaus'], help='loss function mode')
     parser.add_argument("--loss-fn", default='Huber', type=str, choices=['MSE', 'Huber'], help='loss function: MSE or Huberloss')
     parser.add_argument("--huber-delta", default=50, type=float, help='delta value for Huberloss')

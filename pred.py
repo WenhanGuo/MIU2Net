@@ -1,9 +1,11 @@
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+
 import torch
 import transforms as T
 from torchvision.transforms import GaussianBlur
 from my_dataset import ImageDataset
 from torch.utils.data import DataLoader, Subset
-import os
 import argparse
 import numpy as np
 import astropy.io.fits as fits
@@ -35,7 +37,8 @@ def main(args):
                                  T.KS_rec(args), 
                                  T.RandomCrop(size=512), 
                                  T.Wiener(args), 
-                                 T.sparse(args)
+                                 T.sparse(args), 
+                                 T.MCALens(args)
                                  ]), 
                              gaus_blur=shear_gb
                              )
@@ -75,7 +78,8 @@ def get_args():
     parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
     parser.add_argument("--ks", default='off', type=str, choices=['off', 'add', 'only'], help='KS93 deconvolution (no KS, KS as an extra channel, no shear and KS only)')
     parser.add_argument("--wiener", default='off', type=str, choices=['off', 'add', 'only'], help='Wiener reconstruction')
-    parser.add_argument("--sparse", default='off', type=str, choices=['off', 'add', 'only'], help='Wiener reconstruction')
+    parser.add_argument("--sparse", default='off', type=str, choices=['off', 'add', 'only'], help='sparse reconstruction')
+    parser.add_argument("--mcalens", default='off', type=str, choices=['off', 'add', 'only'], help='MCAlens reconstruction')
     return parser.parse_args()
 
 

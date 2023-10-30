@@ -85,7 +85,8 @@ def main(args):
                                   T.ContinuousRotation(degrees=180), 
                                   T.RandomCrop(size=512), 
                                   T.Wiener(args), 
-                                  T.sparse(args)
+                                  T.sparse(args), 
+                                  T.MCALens(args)
                                   ]), 
                               gaus_blur=shear_gb
                               )
@@ -95,7 +96,8 @@ def main(args):
                                 T.KS_rec(args), 
                                 T.RandomCrop(size=512), 
                                 T.Wiener(args), 
-                                T.sparse(args)
+                                T.sparse(args), 
+                                T.MCALens(args)
                                 ]), 
                             gaus_blur=shear_gb
                             )
@@ -111,6 +113,8 @@ def main(args):
     if args.wiener == 'add':
         in_channels += 1
     if args.sparse == 'add':
+        in_channels += 1
+    if args.mcalens == 'add':
         in_channels += 1
     print('in_channels =', in_channels)
     model = u2net_full(in_ch=in_channels)
@@ -277,6 +281,7 @@ def get_args():
     parser.add_argument("--ks", default='off', type=str, choices=['off', 'add', 'only'], help='KS93 deconvolution (no KS, KS as an extra channel, no shear and KS only)')
     parser.add_argument("--wiener", default='off', type=str, choices=['off', 'add', 'only'], help='Wiener reconstruction')
     parser.add_argument("--sparse", default='off', type=str, choices=['off', 'add', 'only'], help='sparse reconstruction')
+    parser.add_argument("--mcalens", default='off', type=str, choices=['off', 'add', 'only'], help='MCALens reconstruction')
     parser.add_argument("--loss-mode", default='native', type=str, choices=['native', 'gaus'], help='loss function mode')
     parser.add_argument("--loss-fn", default='Huber', type=str, choices=['MSE', 'Huber'], help='loss function: MSE or Huberloss')
     parser.add_argument("--huber-delta", default=50, type=float, help='delta value for Huberloss')

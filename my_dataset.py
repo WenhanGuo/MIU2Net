@@ -32,6 +32,7 @@ class ImageDataset(Dataset):
         return len(self.img_names)
     
     def read_img(self, idx, img_type=['gamma1', 'gamma2', 'kappa']):
+        # img_name = self.img_names[img_type][idx][2:-2]   # bypass strange indexing of '["img_name"]' in py3.6 env
         img_name = self.img_names[img_type][idx][0]   # get single image name
         with fits.open(img_name, memmap=False) as f:
             img = f[0].data   # read image into numpy array
@@ -122,6 +123,7 @@ class ImageDataset_kappa3d(Dataset):
 
 
 
+'''
 class ImageDataset_density(Dataset):
     def __init__(self, catalog, z_cat, n_galaxy, lens_zslices, src_zslices, transforms, gaus_blur=None):
         """
@@ -206,3 +208,4 @@ class ImageDataset_density(Dataset):
         # gamma shape = torch.Size([2, 512, 512]); kappa shape = torch.Size([1, 512, 512])
         # if ks: gamma shape = torch.Size([3, 512, 512]); last channel is ks map
         return image, target
+'''
