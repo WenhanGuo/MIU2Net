@@ -1,6 +1,6 @@
 #! -*- coding: utf-8 -*-
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1, 4'
+os.environ['CUDA_VISIBLE_DEVICES'] = '4'
 
 from model_u2net import u2net_full
 import torch

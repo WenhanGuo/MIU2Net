@@ -161,7 +161,7 @@ def b3spline_fast(step):
     return kernel2d
 
 
-def star2d(im, scale, gen2=False, bord=1, nb_procs=0, fast=True, verb=0):
+def star2d(im, scale, gen2=False, bord=1, nb_procs=1, fast=True, verb=0, pass_class=None):
     """
     Routie to calculate the 1st and 2nd generation starlet transform.
     if the global variable PYSAP_CXX is True, a C++ code will be used through
@@ -199,7 +199,8 @@ def star2d(im, scale, gen2=False, bord=1, nb_procs=0, fast=True, verb=0):
         # verb=1
         ima = np.zeros((nx, ny))
         ima[:, :] = im
-        psWT = pysparse.MRStarlet(bord, gen2, nb_procs, verb)
+        # psWT = pysparse.MRStarlet(bord, gen2, nb_procs, verb)
+        psWT = pass_class
         # wl = psWT.transform(ima.astype(np.float), nz)
         wl = psWT.transform(ima.astype(float), nz)   # edited 2022/10/30 for numpy compatibility
         wt = (np.stack(wl)).astype(np.double)
@@ -229,7 +230,7 @@ def star2d(im, scale, gen2=False, bord=1, nb_procs=0, fast=True, verb=0):
     return wt
 
 
-def istar2d(wt, gen2=True, bord=0, nb_procs=0, fast=True, verb=0):
+def istar2d(wt, gen2=True, bord=0, nb_procs=1, fast=True, verb=0, pass_class=None):
     """
     Routie to calculate the 1st and 2nd generation incerse starlet transform.
     if the global variable PYSAP_CXX is True, a C++ code will be used through
@@ -266,7 +267,8 @@ def istar2d(wt, gen2=True, bord=0, nb_procs=0, fast=True, verb=0):
         for s in range(nz):
             # dat_list.append(wt[s, :, :].astype(np.float))
             dat_list.append(wt[s, :, :].astype(float))
-        psWT = pysparse.MRStarlet(bord, gen2, nb_procs, verb)
+        # psWT = pysparse.MRStarlet(bord, gen2, nb_procs, verb)
+        psWT = pass_class
         imRec = (psWT.recons(dat_list)).astype(np.double)
     else:
         # trans = 1 if gen2 else 2
@@ -314,7 +316,7 @@ def istar2d(wt, gen2=True, bord=0, nb_procs=0, fast=True, verb=0):
     return imRec
 
 
-def adstar2d(wtOri, gen2=True, bord=0, nb_procs=0, fast=True, verb=0):
+def adstar2d(wtOri, gen2=True, bord=0, nb_procs=1, fast=True, verb=0, pass_class=None):
     """
     Routine to calculate the 1st and 2nd generation adjoint starlet operator.
     if the global variable PYSAP_CXX is True, a C++ code will be used through
@@ -349,7 +351,8 @@ def adstar2d(wtOri, gen2=True, bord=0, nb_procs=0, fast=True, verb=0):
         dat_list = []
         for s in range(nz):
             dat_list.append((wt[s, :, :]).astype(float))
-        psWT = pysparse.MRStarlet(bord, gen2, nb_procs, verb)
+        # psWT = pysparse.MRStarlet(bord, gen2, nb_procs, verb)
+        psWT = pass_class
         imRec = (psWT.recons(dat_list, True)).astype(double)
     else:
         # print("NO BINDING")
@@ -409,7 +412,7 @@ class starlet2d:
 
     # __init__ is the constructor
     def __init__(
-        self, name="wt", gen2=True, l2norm=True, bord=1, verb=False, nb_procs=0
+        self, name="wt", gen2=True, l2norm=True, bord=1, verb=False, nb_procs=1
     ):
         """
         Constructor
@@ -445,7 +448,7 @@ class starlet2d:
         self.nb_procs = nb_procs
         self.bord = bord
 
-    def get_gen1_starlet_tabnorm(self):
+    def get_gen1_starlet_tabnorm(self, pass_class=None):
         """
         Compute the normalisation coefficients at each scale of the firast generation
         starlet transform.
@@ -457,12 +460,12 @@ class starlet2d:
         im = np.zeros((self.nx, self.ny))
         im = im.astype("float64")
         im[int(self.nx / 2), int(self.ny / 2)] = np.float64(1.0)
-        wt = star2d(im, self.ns, gen2=False)
+        wt = star2d(im, self.ns, gen2=False, pass_class=pass_class)
         tmp = wt**2
         tabNs = np.sqrt(np.sum(np.sum(tmp, 1), 1))
         return tabNs
 
-    def init_starlet(self, nx, ny, nscale=0):
+    def init_starlet(self, nx, ny, nscale=0, pass_class=None):
         """
         Initialize the scale for a given image size and a number of scales.
         Parameters
@@ -483,13 +486,13 @@ class starlet2d:
             mins = np.min([nx, ny])
             nscale = int(np.log(mins) // 1)
         self.ns = int(nscale)
-        self.Starlet_Gen1TabNorm = self.get_gen1_starlet_tabnorm()
+        self.Starlet_Gen1TabNorm = self.get_gen1_starlet_tabnorm(pass_class=pass_class)
         if self.l2norm:
             self.TabNorm = np.ones(self.ns, dtype=float)
         else:
-            self.TabNorm = self.get_gen1_starlet_tabnorm()
+            self.TabNorm = self.get_gen1_starlet_tabnorm(pass_class=pass_class)
         # for pysparse
-        self.nb_procs = 0
+        self.nb_procs = 1
 
     def info(self):  # sound is a method (a method is a function of an object)
         """
@@ -527,7 +530,7 @@ class starlet2d:
             )
 
     #    def transform(im,nscale,gen2=self.gen2,normalization=self.l2norm):
-    def transform(self, im, WTname=None):
+    def transform(self, im, WTname=None, pass_class=None):
         """
         Apply the starlet transform to image. Coeffients are stored in
         self.coef[:,:,:].  self.coef[s,:,:] is the wavelet scale at scale s.
@@ -545,17 +548,17 @@ class starlet2d:
         """
         (Nx, Ny) = im.shape
         if self.ns <= 1 or self.nx != Nx or self.ny != Ny:
-            self.init_starlet(Nx, Ny, nscale=0)
+            self.init_starlet(Nx, Ny, nscale=0, pass_class=pass_class)
         if WTname is not None:
             self.name = WTname
         self.coef = star2d(
-            im, self.ns, self.gen2, self.bord, self.nb_procs, True, self.verb
+            im, self.ns, self.gen2, self.bord, self.nb_procs, True, self.verb, pass_class=pass_class
         )
         if self.l2norm:
             for i in np.arange(self.ns):
                 self.coef[i, :, :] /= self.Starlet_Gen1TabNorm[i]
 
-    def recons(self, adjoint=False):
+    def recons(self, adjoint=False, pass_class=None):
         """
         Reconstruct an image from its calculated starlet coefficients.
         Parameters
@@ -581,6 +584,7 @@ class starlet2d:
                 nb_procs=self.nb_procs,
                 fast=True,
                 verb=self.verb,
+                pass_class=pass_class
             )
         else:
             rec = istar2d(
@@ -590,6 +594,7 @@ class starlet2d:
                 nb_procs=self.nb_procs,
                 fast=True,
                 verb=self.verb,
+                pass_class=pass_class
             )
         return rec
 

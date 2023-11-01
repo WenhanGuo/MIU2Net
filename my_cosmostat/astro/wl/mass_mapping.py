@@ -159,7 +159,7 @@ class massmap2d:
     def __init__(self, name="mass"):  # __init__ is the constructor
         self.WT = starlet2d()  # Starlet wavelet Class defined in starlet.py
 
-    def init_massmap(self, nx, ny, ns=0):
+    def init_massmap(self, nx, ny, ns=0, pass_class=None):
         """
         Initialize the class for a given image size and a number of scales ns
         to be used in the wavelet decomposition.
@@ -181,7 +181,7 @@ class massmap2d:
         self.nx = nx
         self.ny = ny
         self.WT = starlet2d(gen2=True, l2norm=True, bord=1, verb=False)
-        self.WT.init_starlet(nx, ny, nscale=ns)
+        self.WT.init_starlet(nx, ny, nscale=ns, pass_class=pass_class)
         self.WT.name = "WT-MassMap"
         k1, k2 = np.meshgrid(np.fft.fftfreq(nx), np.fft.fftfreq(ny))
         denom = k1 * k1 + k2 * k2
@@ -341,7 +341,7 @@ class massmap2d:
     def k2g(self, kappa):
         return self.kappa_to_gamma(kappa)
 
-    def gamma_to_cf_kappa(self, g1, g2):
+    def gamma_to_cf_kappa(self, g1, g2, pass_class=None):
         """
         This routine performs a direct inversion from shear to convergence,
         it return a comlex field, with the real part being the convergence (E mode),
@@ -361,11 +361,11 @@ class massmap2d:
         """
         if self.WT.nx == 0 or self.WT.ny == 0:
             (nx, ny) = np.shape(g1)
-            self.WT.init_starlet(nx, ny, gen2=1, l2norm=1, name="WT-MassMap")
+            self.WT.init_starlet(nx, ny, gen2=1, l2norm=1, name="WT-MassMap", pass_class=pass_class)
         g = g1 + 1j * g2
         return np.fft.ifft2((self.kernel1 - 1j * self.kernel2) * np.fft.fft2(g))
 
-    def gamma_to_kappa(self, g1, g2):
+    def gamma_to_kappa(self, g1, g2, pass_class=None):
         """
         Same as gamma_to_cf_kappa, but returns only the E mode (convergence)
 
@@ -381,12 +381,12 @@ class massmap2d:
         Notes
         -----
         """
-        k = self.gamma_to_cf_kappa(g1, g2)
+        k = self.gamma_to_cf_kappa(g1, g2, pass_class=pass_class)
         return k.real
 
     # Fast  interactive call to gamma_to_kappa
-    def g2k(self, gam1, gam2):
-        return self.gamma_to_kappa(gam1, gam2)
+    def g2k(self, gam1, gam2, pass_class=None):
+        return self.gamma_to_kappa(gam1, gam2, pass_class=pass_class)
 
     def smooth(self, map, sigma=2.0):
         """
@@ -530,7 +530,7 @@ class massmap2d:
     def g2eb(self, g1_map, g2_map):
         return self.H_adjoint_g2eb(g1_map, g2_map)
 
-    def get_wt_noise_level(self, InshearData, Nrea=DEF_Nrea):
+    def get_wt_noise_level(self, InshearData, Nrea=DEF_Nrea, pass_class=None):
         """
         Computes the noise standard deviation for each wavelet coefficients of
         the convergence map, using Nrea noise realisations of the shear field
@@ -554,7 +554,7 @@ class massmap2d:
         for i in np.arange(Nrea):
             n1, n2 = InshearData.get_shear_noise(FillMask=True)
             ke, kb = self.g2eb(n1, n2)
-            self.WT.transform(ke)
+            self.WT.transform(ke, pass_class=pass_class)
             if i == 0:
                 WT_Sigma = np.zeros((self.WT.ns, self.WT.nx, self.WT.ny))
             WT_Sigma += (self.WT.coef) ** 2.0  # by definition the mean of wt
@@ -574,6 +574,7 @@ class massmap2d:
         FirstDetectScale=DEF_FirstDetectScale,
         OnlyPos=False,
         ComputeWTCoef=True,
+        pass_class=None
     ):
         """
         Estimate the active set of coefficents, i.e. the coefficients of the
@@ -615,12 +616,12 @@ class massmap2d:
 
         if ComputeWTCoef:
             e, b = self.g2eb(InshearData.g1, InshearData.g2)
-            self.WT.transform(e)
+            self.WT.transform(e, pass_class=pass_class)
 
         WT_Support = self.WT.coef * 0.0
         Last = self.WT.ns - 1
         if UseRea and WT_Sigma is None:
-            WT_Sigma = self.get_wt_noise_level(InshearData, Nrea=Nrea)
+            WT_Sigma = self.get_wt_noise_level(InshearData, Nrea=Nrea, pass_class=pass_class)
 
         if Nsigma is None:
             Nsigma = self.DEF_Nsigma
@@ -718,7 +719,7 @@ class massmap2d:
             np.fft.fftshift(WienerFilterMap * np.fft.fftshift(np.fft.fft2(map)))
         )
 
-    def wiener(self, gamma1, gamma2, PowSpecSignal, PowSpecNoise):
+    def wiener(self, gamma1, gamma2, PowSpecSignal, PowSpecNoise, pass_class=None):
         """
         Compute the standard wiener mass map.
         Parameters
@@ -752,7 +753,7 @@ class massmap2d:
         ind = np.where(Den != 0)
         Wfc = np.zeros((nx, ny))
         Wfc[ind] = Ps_map[ind] / Den[ind]
-        t = self.gamma_to_cf_kappa(gamma1, gamma2)  # xg + H^T(eta / Sn * (y- H * xg))
+        t = self.gamma_to_cf_kappa(gamma1, gamma2, pass_class=pass_class)  # xg + H^T(eta / Sn * (y- H * xg))
         kw = self.mult_wiener(t, Wfc)
         retr = np.zeros((nx, ny))
         reti = np.zeros((nx, ny))
@@ -1089,6 +1090,7 @@ class massmap2d:
         Bmode=True,
         ktr=None,
         PropagateNoise=False,
+        pass_class=None
     ):
         """
         MCAlens algorithm; Estimate the complex EB mode. The solution is assumed to have
@@ -1195,13 +1197,13 @@ class massmap2d:
             resi1, resi2 = self.get_resi(xg, gamma1, gamma2, Esn)
             lmax = self.get_lmax_dct_inpaint(resi1, resi2)
 
-        ks = self.gamma_to_cf_kappa(gamma1, gamma2)
+        ks = self.gamma_to_cf_kappa(gamma1, gamma2, pass_class=pass_class)
         rec[:, :] = ks.real
         ks = self.smooth(rec, sigma=15)
         resi1, resi2 = self.get_resi(ks, gamma1, gamma2, Esn_Sparse)
 
         resi1 += ks
-        self.WT.transform(resi1)
+        self.WT.transform(resi1, pass_class=pass_class)
         self.WT_ActiveCoef = self.get_active_wt_coef(
             InshearData,
             OnlyPos=OnlyPos,
@@ -1209,6 +1211,7 @@ class massmap2d:
             SigmaNoise=SigmaNoise,
             Nsigma=Nsigma,
             ComputeWTCoef=False,
+            pass_class=pass_class
         )
         self.WT_ActiveCoef[self.WT.ns - 1, :, :] = 0
 
@@ -1227,13 +1230,13 @@ class massmap2d:
 
             # sparse component
             xt[:, :] = resi1 + 1j * resi2  # xg + H^T(eta / Sn * (y- H * xg))
-            self.WT.transform(xt.real)
+            self.WT.transform(xt.real, pass_class=pass_class)
             self.WT.coef *= self.WT_ActiveCoef
             # self.WT.threshold(SigmaNoise=SigmaNoise, Nsigma=Nsigma, ThresCoarse=True, hard=True, FirstDetectScale=FirstDetectScale,Verbose=False)
             # if OnlyPos:
             #    ind = np.where(self.WT.coef < 0)
             #    self.WT.coef[ind]=0
-            signif_resi = self.WT.recons()
+            signif_resi = self.WT.recons(pass_class=pass_class)
             # if n % 10 == 0:
             #    info(signif_resi)
             rec[:, :] = xs.real + signif_resi
@@ -1248,7 +1251,7 @@ class massmap2d:
                     ind = np.where(rec < 0)
                     rec[ind] = 0
             if Bmode:
-                self.WT.transform(xs.imag)
+                self.WT.transform(xs.imag, pass_class=pass_class)
                 self.WT.threshold(
                     SigmaNoise=SigmaNoise,
                     Nsigma=Nsigma,
@@ -1257,7 +1260,7 @@ class massmap2d:
                     FirstDetectScale=FirstDetectScale,
                     Verbose=False,
                 )
-                reci[:, :] = self.WT.recons()
+                reci[:, :] = self.WT.recons(pass_class=pass_class)
             else:
                 reci[:, :] = 0
             xs = rec + 1j * reci
@@ -1345,6 +1348,7 @@ class massmap2d:
         Nrea=None,
         hard=True,
         FirstGuess=None,
+        pass_class=None
     ):
         """
         Reconstruction of the convergence field using sparsity. The detection levels
@@ -1411,7 +1415,7 @@ class massmap2d:
 
         if UseNoiseRea:
             if WT_Sigma is None:
-                self.WT_Sigma = self.get_wt_noise_level(InshearData, Nrea=Nrea)
+                self.WT_Sigma = self.get_wt_noise_level(InshearData, Nrea=Nrea, pass_class=pass_class)
             else:
                 self.WT_Sigma = WT_Sigma
             #            info(self.WT_Sigma, name='WT_Sigma2')
@@ -1481,7 +1485,7 @@ class massmap2d:
         if WT_Inpaint:
             lmin = 0
             resi1, resi2 = self.get_resi(xg, gamma1, gamma2, WeightResi)
-            self.WT.transform(resi1)
+            self.WT.transform(resi1, pass_class=pass_class)
             lmax = np.max(np.abs(self.WT.coef[0 : self.WT.ns - 1, :, :]))
 
         # Main iteration
@@ -1496,7 +1500,7 @@ class massmap2d:
             xg += resi1 + 1j * resi2
             # print("   BEF  0.87?Sparse rec Iter: ", n+1, ", Sol =  %5.4f" %  LA.norm(xg.real))
 
-            self.WT.transform(xg.real)
+            self.WT.transform(xg.real, pass_class=pass_class)
             self.WT.threshold(
                 SigmaNoise=self.WT_Sigma,
                 Nsigma=Nsig,
@@ -1505,14 +1509,14 @@ class massmap2d:
                 FirstDetectScale=FirstDetectScale,
                 Verbose=False,
             )
-            rec[:, :] = self.WT.recons()
+            rec[:, :] = self.WT.recons(pass_class=pass_class)
 
             if WT_Inpaint:
                 lval = lmin + (lmax - lmin) * (1 - erf(2.8 * n / niter))  # exp decay
                 self.WT.threshold(
                     SigmaNoise=1.0, Nsigma=lval, hard=False, KillCoarse=False
                 )
-                inp = self.WT.recons()
+                inp = self.WT.recons(pass_class=pass_class)
                 rec[:, :] = (1 - mask) * inp + mask * xg.real
             xg[:, :] = rec + Iz
             # xg = self.step_wt_recons(t)
@@ -1548,7 +1552,7 @@ class massmap2d:
             xn = np.copy(xg)
             resi1, resi2 = self.get_resi(xg, gamma1, gamma2, WeightResi)
             xn += resi1 + 1j * resi2
-            self.WT.transform(xn.real)
+            self.WT.transform(xn.real, pass_class=pass_class)
             # determine the set of active coefficients
             if UseNoiseRea:
                 self.WT_ActiveCoef = self.get_active_wt_coef(
@@ -1558,6 +1562,7 @@ class massmap2d:
                     SigmaNoise=1.0,
                     Nsigma=Nsigma,
                     ComputeWTCoef=False,
+                    pass_class=pass_class
                 )
             else:
                 self.WT_ActiveCoef = self.get_active_wt_coef(
@@ -1566,12 +1571,13 @@ class massmap2d:
                     SigmaNoise=tau,
                     Nsigma=Nsigma,
                     ComputeWTCoef=False,
+                    pass_class=pass_class
                 )
             for n in range(self.niter_debias):
                 resi1, resi2 = self.get_resi(xg, gamma1, gamma2, mask)
                 xg += resi1 + 1j * resi2
                 self.WT.coef *= self.WT_ActiveCoef
-                rec[:, :] = self.WT.recons()
+                rec[:, :] = self.WT.recons(pass_class=pass_class)
                 xg[:, :] = rec + Iz
         return xg.real, xg.imag
 

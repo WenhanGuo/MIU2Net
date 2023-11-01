@@ -6,6 +6,12 @@ import numpy as np
 from typing import Sequence
 from my_cosmostat.astro.wl.mass_mapping import massmap2d, shear_data
 from astropy.io import fits
+try:
+    import pysparse
+except ImportError:
+    print(
+        "Warning in transforms.py: do not find pysap bindings ==> use slow python code. "
+    )
 
 
 class Compose(object):
@@ -113,11 +119,12 @@ class KS_rec(object):
     def __init__(self, args):
         self.activate = args.ks
         self.M = massmap2d(name='mass_ks')
-        self.M.init_massmap(nx=1024, ny=1024)
+        self.psWT = pysparse.MRStarlet(bord=1, gen2=False, nb_procs=1, verbose=0)
+        self.M.init_massmap(nx=1024, ny=1024, pass_class=self.psWT)
         print('KS initialized')
 
     def shear_rec(self, shear1, shear2):
-        ks =  self.M.g2k(shear1, shear2)
+        ks =  self.M.g2k(shear1, shear2, pass_class=self.psWT)
         return ks
 
     def __call__(self, image, target):
@@ -156,11 +163,12 @@ class Wiener(object):
             self.p_noise = fits.open('./noise_power_spectrum_g20.fits')[0].data
         # Create the cosmostat mass mapping structure and initialize it
         self.M = massmap2d(name='mass_wiener')
-        self.M.init_massmap(nx=512, ny=512)
+        self.psWT = pysparse.MRStarlet(bord=1, gen2=False, nb_procs=1, verbose=0)
+        self.M.init_massmap(nx=512, ny=512, pass_class=self.psWT)
         print('wiener initialized')
 
     def wiener(self, shear1, shear2):
-        retr, reti = self.M.wiener(shear1, shear2, PowSpecSignal=self.p_signal, PowSpecNoise=self.p_noise)
+        retr, reti = self.M.wiener(shear1, shear2, PowSpecSignal=self.p_signal, PowSpecNoise=self.p_noise, pass_class=self.psWT)
         return retr, reti
 
     def __call__(self, image, target):
@@ -188,7 +196,8 @@ class sparse(object):
     def __init__(self, args):
         self.activate = args.sparse
         self.M = massmap2d(name='mass_sparse')
-        self.M.init_massmap(nx=512, ny=512)
+        self.psWT = pysparse.MRStarlet(bord=1, gen2=False, nb_procs=1, verbose=0)
+        self.M.init_massmap(nx=512, ny=512, pass_class=self.psWT)
         self.D = shear_data()
 
         sigma_e = 0.4   # rms amplitude of the intrinsic ellipticity distribution
@@ -208,10 +217,11 @@ class sparse(object):
         # Do a sparse reconstruction with a 5 sigma detection
         ksr5, ti = self.M.sparse_recons(InshearData=self.D, 
                                         UseNoiseRea=False, 
-                                        niter=1, 
+                                        niter=12, 
                                         Nsigma=5, 
                                         ThresCoarse=False, 
-                                        Inpaint=False)
+                                        Inpaint=False, 
+                                        pass_class=self.psWT)
         return ksr5, ti
 
     def __call__(self, image, target):
@@ -233,7 +243,8 @@ class MCALens(object):
         self.activate = args.mcalens
         self.p_signal = fits.open('./signal_power_spectrum.fits')[0].data
         self.M = massmap2d(name='mass_mcalens')
-        self.M.init_massmap(nx=512, ny=512)
+        self.psWT = pysparse.MRStarlet(bord=1, gen2=False, nb_procs=1, verbose=0)
+        self.M.init_massmap(nx=512, ny=512, pass_class=self.psWT)
         self.D = shear_data()
 
         sigma_e = 0.4   # rms amplitude of the intrinsic ellipticity distribution
@@ -253,11 +264,12 @@ class MCALens(object):
         # MCAlens reconstruction with a 5 sigma detection
         k1r5, k1i5, k2r5, k2i = self.M.sparse_wiener_filtering(InshearData=self.D, 
                                                                PowSpecSignal=self.p_signal,
-                                                               niter=1, 
+                                                               niter=12, 
                                                                Nsigma=5, 
                                                                Inpaint=False, 
                                                                Bmode=False, 
-                                                               ktr=None)
+                                                               ktr=None, 
+                                                               pass_class=self.psWT)
         return k1r5, k1i5, k2r5, k2i
 
     def __call__(self, image, target):
