@@ -199,7 +199,7 @@ def star2d(im, scale, gen2=False, bord=1, nb_procs=1, fast=True, verb=0, pass_cl
         # verb=1
         ima = np.zeros((nx, ny))
         ima[:, :] = im
-        # pass_class arg added 2022/11/2 for cpu memory management
+        # pass_class arg added 2023/11/2 for cpu memory management
         if pass_class == None:
             psWT = pysparse.MRStarlet(bord, gen2, nb_procs, verb)
         else:
@@ -208,7 +208,7 @@ def star2d(im, scale, gen2=False, bord=1, nb_procs=1, fast=True, verb=0, pass_cl
             elif gen2 == True:
                 psWT = pass_class[1]   # psWT_gen2
         # wl = psWT.transform(ima.astype(np.float), nz)
-        wl = psWT.transform(ima.astype(float), nz)   # edited 2022/10/30 for numpy compatibility
+        wl = psWT.transform(ima.astype(float), nz)   # edited 2023/10/30 for numpy compatibility
         wt = (np.stack(wl)).astype(np.double)
     else:
         wt = np.zeros((nz, nx, ny))
@@ -273,7 +273,7 @@ def istar2d(wt, gen2=True, bord=0, nb_procs=1, fast=True, verb=0, pass_class=Non
         for s in range(nz):
             # dat_list.append(wt[s, :, :].astype(np.float))
             dat_list.append(wt[s, :, :].astype(float))
-        # pass_class arg added 2022/11/2 for cpu memory management
+        # pass_class arg added 2023/11/2 for cpu memory management
         if pass_class == None:
             psWT = pysparse.MRStarlet(bord, gen2, nb_procs, verb)
         else:
@@ -363,7 +363,7 @@ def adstar2d(wtOri, gen2=True, bord=0, nb_procs=1, fast=True, verb=0, pass_class
         dat_list = []
         for s in range(nz):
             dat_list.append((wt[s, :, :]).astype(float))
-        # pass_class arg added 2022/11/2 for cpu memory management
+        # pass_class arg added 2023/11/2 for cpu memory management
         if pass_class == None:
             psWT = pysparse.MRStarlet(bord, gen2, nb_procs, verb)
         else:
