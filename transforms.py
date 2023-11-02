@@ -119,12 +119,13 @@ class KS_rec(object):
     def __init__(self, args):
         self.activate = args.ks
         self.M = massmap2d(name='mass_ks')
-        self.psWT = pysparse.MRStarlet(bord=1, gen2=False, nb_procs=1, verbose=0)
-        self.M.init_massmap(nx=1024, ny=1024, pass_class=self.psWT)
+        self.psWT_gen1 = pysparse.MRStarlet(bord=1, gen2=False, nb_procs=1, verbose=0)
+        self.psWT_gen2 = pysparse.MRStarlet(bord=1, gen2=True, nb_procs=1, verbose=0)
+        self.M.init_massmap(nx=1024, ny=1024, pass_class=[self.psWT_gen1, self.psWT_gen2])
         print('KS initialized')
 
     def shear_rec(self, shear1, shear2):
-        ks =  self.M.g2k(shear1, shear2, pass_class=self.psWT)
+        ks =  self.M.g2k(shear1, shear2, pass_class=[self.psWT_gen1, self.psWT_gen2])
         return ks
 
     def __call__(self, image, target):
@@ -163,12 +164,16 @@ class Wiener(object):
             self.p_noise = fits.open('./noise_power_spectrum_g20.fits')[0].data
         # Create the cosmostat mass mapping structure and initialize it
         self.M = massmap2d(name='mass_wiener')
-        self.psWT = pysparse.MRStarlet(bord=1, gen2=False, nb_procs=1, verbose=0)
-        self.M.init_massmap(nx=512, ny=512, pass_class=self.psWT)
+        self.psWT_gen1 = pysparse.MRStarlet(bord=1, gen2=False, nb_procs=1, verbose=0)
+        self.psWT_gen2 = pysparse.MRStarlet(bord=1, gen2=True, nb_procs=1, verbose=0)
+        self.M.init_massmap(nx=512, ny=512, pass_class=[self.psWT_gen1, self.psWT_gen2])
         print('wiener initialized')
 
     def wiener(self, shear1, shear2):
-        retr, reti = self.M.wiener(shear1, shear2, PowSpecSignal=self.p_signal, PowSpecNoise=self.p_noise, pass_class=self.psWT)
+        retr, reti = self.M.wiener(shear1, shear2, 
+                                   PowSpecSignal=self.p_signal, 
+                                   PowSpecNoise=self.p_noise, 
+                                   pass_class=[self.psWT_gen1, self.psWT_gen2])
         return retr, reti
 
     def __call__(self, image, target):
@@ -196,8 +201,9 @@ class sparse(object):
     def __init__(self, args):
         self.activate = args.sparse
         self.M = massmap2d(name='mass_sparse')
-        self.psWT = pysparse.MRStarlet(bord=1, gen2=False, nb_procs=1, verbose=0)
-        self.M.init_massmap(nx=512, ny=512, pass_class=self.psWT)
+        self.psWT_gen1 = pysparse.MRStarlet(bord=1, gen2=False, nb_procs=1, verbose=0)
+        self.psWT_gen2 = pysparse.MRStarlet(bord=1, gen2=True, nb_procs=1, verbose=0)
+        self.M.init_massmap(nx=512, ny=512, pass_class=[self.psWT_gen1, self.psWT_gen2])
         self.D = shear_data()
 
         sigma_e = 0.4   # rms amplitude of the intrinsic ellipticity distribution
@@ -221,7 +227,7 @@ class sparse(object):
                                         Nsigma=5, 
                                         ThresCoarse=False, 
                                         Inpaint=False, 
-                                        pass_class=self.psWT)
+                                        pass_class=[self.psWT_gen1, self.psWT_gen2])
         return ksr5, ti
 
     def __call__(self, image, target):
@@ -243,8 +249,9 @@ class MCALens(object):
         self.activate = args.mcalens
         self.p_signal = fits.open('./signal_power_spectrum.fits')[0].data
         self.M = massmap2d(name='mass_mcalens')
-        self.psWT = pysparse.MRStarlet(bord=1, gen2=False, nb_procs=1, verbose=0)
-        self.M.init_massmap(nx=512, ny=512, pass_class=self.psWT)
+        self.psWT_gen1 = pysparse.MRStarlet(bord=1, gen2=False, nb_procs=1, verbose=0)
+        self.psWT_gen2 = pysparse.MRStarlet(bord=1, gen2=True, nb_procs=1, verbose=0)
+        self.M.init_massmap(nx=512, ny=512, pass_class=[self.psWT_gen1, self.psWT_gen2])
         self.D = shear_data()
 
         sigma_e = 0.4   # rms amplitude of the intrinsic ellipticity distribution
@@ -269,7 +276,7 @@ class MCALens(object):
                                                                Inpaint=False, 
                                                                Bmode=False, 
                                                                ktr=None, 
-                                                               pass_class=self.psWT)
+                                                               pass_class=[self.psWT_gen1, self.psWT_gen2])
         return k1r5, k1i5, k2r5, k2i
 
     def __call__(self, image, target):

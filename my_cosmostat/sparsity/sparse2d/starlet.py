@@ -199,8 +199,14 @@ def star2d(im, scale, gen2=False, bord=1, nb_procs=1, fast=True, verb=0, pass_cl
         # verb=1
         ima = np.zeros((nx, ny))
         ima[:, :] = im
-        # psWT = pysparse.MRStarlet(bord, gen2, nb_procs, verb)
-        psWT = pass_class
+        # pass_class arg added 2022/11/2 for cpu memory management
+        if pass_class == None:
+            psWT = pysparse.MRStarlet(bord, gen2, nb_procs, verb)
+        else:
+            if gen2 == False:
+                psWT = pass_class[0]   # psWT_gen1
+            elif gen2 == True:
+                psWT = pass_class[1]   # psWT_gen2
         # wl = psWT.transform(ima.astype(np.float), nz)
         wl = psWT.transform(ima.astype(float), nz)   # edited 2022/10/30 for numpy compatibility
         wt = (np.stack(wl)).astype(np.double)
@@ -267,8 +273,14 @@ def istar2d(wt, gen2=True, bord=0, nb_procs=1, fast=True, verb=0, pass_class=Non
         for s in range(nz):
             # dat_list.append(wt[s, :, :].astype(np.float))
             dat_list.append(wt[s, :, :].astype(float))
-        # psWT = pysparse.MRStarlet(bord, gen2, nb_procs, verb)
-        psWT = pass_class
+        # pass_class arg added 2022/11/2 for cpu memory management
+        if pass_class == None:
+            psWT = pysparse.MRStarlet(bord, gen2, nb_procs, verb)
+        else:
+            if gen2 == False:
+                psWT = pass_class[0]   # psWT_gen1
+            elif gen2 == True:
+                psWT = pass_class[1]   # psWT_gen2
         imRec = (psWT.recons(dat_list)).astype(np.double)
     else:
         # trans = 1 if gen2 else 2
@@ -351,9 +363,15 @@ def adstar2d(wtOri, gen2=True, bord=0, nb_procs=1, fast=True, verb=0, pass_class
         dat_list = []
         for s in range(nz):
             dat_list.append((wt[s, :, :]).astype(float))
-        # psWT = pysparse.MRStarlet(bord, gen2, nb_procs, verb)
-        psWT = pass_class
-        imRec = (psWT.recons(dat_list, True)).astype(double)
+        # pass_class arg added 2022/11/2 for cpu memory management
+        if pass_class == None:
+            psWT = pysparse.MRStarlet(bord, gen2, nb_procs, verb)
+        else:
+            if gen2 == False:
+                psWT = pass_class[0]   # psWT_gen1
+            elif gen2 == True:
+                psWT = pass_class[1]   # psWT_gen2
+        imRec = (psWT.recons(dat_list, True)).astype(np.double)
     else:
         # print("NO BINDING")
         # Unnormalization step
