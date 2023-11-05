@@ -17,7 +17,8 @@ def read_prediction(fname):
         ks = cube[2]
         wiener = cube[3]
         sparse = cube[4]
-    return true, ml, ks, wiener, sparse
+        mcalens = cube[5]
+    return true, ml, ks, wiener, sparse, mcalens
 
 def read_folder(fnames):
     N = len(fnames)
@@ -26,23 +27,26 @@ def read_folder(fnames):
     ks_cube = []
     wiener_cube = []
     sparse_cube = []
+    mcalens_cube = []
 
     for i in range(N):
         fname = fnames[i]
-        true, ml, ks, wiener, sparse = read_prediction(fname)
+        true, ml, ks, wiener, sparse, mcalens = read_prediction(fname)
         true_cube.append(true)
         ml_cube.append(ml)
         ks_cube.append(ks)
         wiener_cube.append(wiener)
         sparse_cube.append(sparse)
+        mcalens_cube.append(mcalens)
     
     true_cube = np.array(true_cube)
     ml_cube = np.array(ml_cube)
     ks_cube = np.array(ks_cube)
     wiener_cube = np.array(wiener_cube)
     sparse_cube = np.array(sparse_cube)
+    mcalens_cube = np.array(mcalens_cube)
 
-    return true_cube, ml_cube, ks_cube, wiener_cube, sparse_cube
+    return true_cube, ml_cube, ks_cube, wiener_cube, sparse_cube, mcalens_cube
 
 
 # peak count statistics
@@ -218,18 +222,3 @@ def plot_pspec(xvals, ps1D, logy, label, c=None):
     if logy == True:
         plt.yscale('log')
     plt.plot(xvals, ps1D, c=c, label=label)
-
-def plot_all_mse(thresholds, true, ml, ks, wiener, sparse, mcalens, mode, title, xlabel):
-    plt.subplots(figsize=(10,8))
-    plt.title(title, fontsize=18)
-    plt.plot(thresholds, rel_mse(true, ml, ks, thresholds, mode=mode), label=r'MSE$_{\rm{ML}}$ / MSE$_{\rm{KS}}$')
-    plt.plot(thresholds, rel_mse(true, ml, wiener, thresholds, mode=mode), label=r'MSE$_{\rm{ML}}$ / MSE$_{\rm{wiener}}$')
-    plt.plot(thresholds, rel_mse(true, ml, sparse, thresholds, mode=mode), label=r'MSE$_{\rm{ML}}$ / MSE$_{\rm{sparse5}}$')
-    plt.plot(thresholds, rel_mse(true, ml, mcalens, thresholds, mode=mode), label=r'MSE$_{\rm{ML}}$ / MSE$_{\rm{MCALens}}$')
-    plt.xlabel(xlabel)
-    plt.axhline(y = 1.0, color='r', linestyle='--', alpha=0.7)
-    plt.axvspan(true.min(), sorted(true.flatten())[259522], alpha=0.15)
-    plt.text(x=-0.02, y=-0.05, s='99% of pixels', fontsize=16)
-    plt.axvspan(sorted(true.flatten())[259522], 0.4, color='r', alpha=0.05)
-    plt.text(x=0.2, y=-0.05, s='top 1% (peaks)', fontsize=16)
-    plt.legend(loc='upper left')
