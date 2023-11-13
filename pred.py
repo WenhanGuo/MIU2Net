@@ -43,7 +43,7 @@ def main(args):
                              gaus_blur=shear_gb
                              )
     test_data = Subset(test_data, np.arange(args.num))
-    test_dataloader = DataLoader(test_data, shuffle=False, batch_size=1)
+    test_dataloader = DataLoader(test_data, shuffle=False, batch_size=1, num_workers=args.cpu)
 
     # load model weights
     model = torch.load(f'../models/{args.name}.pth')
@@ -75,6 +75,7 @@ def get_args():
     parser.add_argument("-g", "--n-galaxy", default=50, type=float, help='number of galaxies per arcmin (to determine noise level)')
     parser.add_argument("--num", default=8, type=int, help='number of test images to run')
     parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/data_1024_2d', type=str, help='data directory')
+    parser.add_argument("--cpu", default=4, type=int, help='number of cpu cores to use')
     parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
     parser.add_argument("--ks", default='off', type=str, choices=['off', 'add', 'only'], help='KS93 deconvolution (no KS, KS as an extra channel, no shear and KS only)')
     parser.add_argument("--wiener", default='off', type=str, choices=['off', 'add', 'only'], help='Wiener reconstruction')
