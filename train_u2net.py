@@ -60,12 +60,39 @@ def create_lr_scheduler(optimizer,
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=f)
 
 
-def generate_peak_mask(args, target, thres_std=1):
-        thresholds = torch.mean(target, dim=(1,2,3)) + thres_std * torch.std(target, dim=(1,2,3))
-        thresholds = thresholds.view(args.batch_size, 1, 1, 1)
-        target_mask = target > thresholds   # mask shape: (batchsize, 1, 512, 512)
-        u2net_sides_mask = target_mask.repeat(7, 1, 1, 1, 1)
-        return target_mask, u2net_sides_mask
+class HuberLogisticLoss(nn.Module):
+    def __init__(self, delta):
+        super().__init__()
+        self.huber = nn.HuberLoss(delta=delta)
+    
+    def gen_logistic(self, x, B=25, K=1, nu=0.1, Q=5, A=0, C=1):
+        Y = A + (K - A) / ((C + Q * torch.e**(-B*abs(x)))**(1/nu))
+        return torch.mean(Y)
+        
+    def forward(self, output, target):
+        return self.huber(output, target) + self.gen_logistic(output - target)
+
+
+class L1LogisticLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+    
+    def l1_gen_logistic(self, x, B=25, K=100, nu=0.1, Q=5, A=0, C=1):
+        l1 = abs(x) - 0.3
+        l1[abs(x) < 0.3] = 0.
+        Y = A + (K - A) / ((C + Q * torch.e**(-B*abs(x)))**(1/nu))
+        return torch.mean(Y + l1 * 20)
+    
+    def forward(self, output, target):
+        return self.l1_gen_logistic(output - target)
+
+
+# def generate_peak_mask(args, target, thres_std=1):
+#         thresholds = torch.mean(target, dim=(1,2,3)) + thres_std * torch.std(target, dim=(1,2,3))
+#         thresholds = thresholds.view(args.batch_size, 1, 1, 1)
+#         target_mask = target > thresholds   # mask shape: (batchsize, 1, 512, 512)
+#         u2net_sides_mask = target_mask.repeat(7, 1, 1, 1, 1)
+#         return target_mask, u2net_sides_mask
 
 
 def main(args):
@@ -128,10 +155,12 @@ def main(args):
     torch.cuda.empty_cache()
 
     # setting loss function
-    if args.loss_fn == 'MSE':
-        loss_fn = nn.MSELoss()
-    elif args.loss_fn == 'Huber':
+    if args.loss_fn == 'Huber':
         loss_fn = nn.HuberLoss(delta=args.huber_delta)
+    elif args.loss_fn == 'HuberLogistic':
+        loss_fn = HuberLogisticLoss(delta=args.huber_delta)
+    elif args.loss_fn == 'L1Logistic':
+        loss_fn = L1LogisticLoss()
     loss_fn = loss_fn.to(device)
 
     # setting optimizer & lr scheduler
@@ -159,23 +188,23 @@ def main(args):
             # gamma shape: (batchsize, 2, 512, 512)
             kappa = kappa.to(device, memory_format=torch.channels_last)
             # kappa shape: (batchsize, 1, 512, 512)
-            kappa_mask, outputs_mask = generate_peak_mask(args, target=kappa, thres_std=1)
-            kappa_peak = kappa * kappa_mask
+            # kappa_mask, outputs_mask = generate_peak_mask(args, target=kappa, thres_std=1)
+            # kappa_peak = kappa * kappa_mask
 
             with torch.cuda.amp.autocast(enabled=scaler is not None):
                 outputs = model(gamma)
-                outputs_peak = [outputs[n] * outputs_mask[n] for n in range(len(outputs))]
+                # outputs_peak = [outputs[n] * outputs_mask[n] for n in range(len(outputs))]
 
-                loss_targ = loss_fn(outputs[0], kappa)
-                loss_targ_peak = loss_fn(outputs_peak[0], kappa_peak)
+                # loss_targ = loss_fn(outputs[0], kappa)
+                # loss_targ_peak = loss_fn(outputs_peak[0], kappa_peak)
                 # native mode: based on true kappa for every side output
-                if args.loss_mode == 'native':
-                    losses = [loss_fn(outputs[j], kappa) for j in range(len(outputs))]
-                    losses.insert(0, loss_targ)
-                    losses_peak = [loss_fn(outputs_peak[k], kappa_peak) for k in range(len(outputs))]
-                    losses_peak.insert(0, loss_targ_peak)
+                losses = [loss_fn(outputs[j], kappa) for j in range(len(outputs))]
+                # losses.insert(0, loss_targ)
+                # losses_peak = [loss_fn(outputs_peak[k], kappa_peak) for k in range(len(outputs))]
+                # losses_peak.insert(0, loss_targ_peak)
                 
-                train_step_loss = sum(losses) + sum(losses_peak) * 5
+                train_step_loss = sum(losses)
+                # train_step_loss = sum(losses) + sum(losses_peak) * 5
 
             # optimizer step
             optimizer.zero_grad()
@@ -194,11 +223,8 @@ def main(args):
             if total_train_step % (len(train_loader) // 3) == 0:
                 print(f"train step: {total_train_step}, \
                       total loss: {train_step_loss:.3}, \
-                      peak loss: {sum(losses_peak):.3},\n \
-                      targ loss: {losses[0]:.3}, \
-                      targ peak loss: {losses_peak[0]:.3},\n \
-                      side loss: {losses[1]:.3},{losses[2]:.3},{losses[3]:.3},{losses[4]:.3},{losses[5]:.3},{losses[6]:.3},\n \
-                      side peak loss: {losses_peak[1]:.3},{losses_peak[2]:.3},{losses_peak[3]:.3},{losses_peak[4]:.3},{losses_peak[5]:.3},{losses_peak[6]:.3}")
+                      targ loss: {losses[0]:.3}, \n \
+                      side loss: {losses[1]:.3},{losses[2]:.3},{losses[3]:.3},{losses[4]:.3},{losses[5]:.3},{losses[6]:.3}")
         
         # validation steps
         model.eval()
@@ -207,13 +233,13 @@ def main(args):
             for gamma, kappa in val_loader:
                 gamma = gamma.to(device, memory_format=torch.channels_last)
                 kappa = kappa.to(device, memory_format=torch.channels_last)
-                kappa_mask, _ = generate_peak_mask(args, target=kappa, thres_std=1)
-                kappa_peak = kappa * kappa_mask
+                # kappa_mask, _ = generate_peak_mask(args, target=kappa, thres_std=1)
+                # kappa_peak = kappa * kappa_mask
                 outputs = model(gamma)
-                outputs_peak = outputs * kappa_mask
-                val_loss += loss_fn(outputs, kappa)
-                val_peak_loss += loss_fn(outputs_peak, kappa_peak)
-                val_step_loss = val_loss + val_peak_loss * 5
+                # outputs_peak = outputs * kappa_mask
+                val_loss += loss_fn(outputs, kappa).item() / len(val_loader)
+                # val_peak_loss += loss_fn(outputs_peak, kappa_peak)
+            # val_step_loss = val_loss + val_peak_loss * 5
 
         # printing final 1x1 convolution layer (learned weights for each side outputs)
         for name, param in model.named_parameters():
@@ -225,43 +251,32 @@ def main(args):
                 print(f'1x1 conv weights = {last_w.round(3)}, bias = {last_b:.3}')
 
         # printing epoch stats & writing to tensorboard
-        print(f"epoch training loss = {train_step_loss:.3}, base {sum(losses):.3}, peak {sum(losses_peak):.3}", f"LR = {curr_lr:.3}")
-        print(f"avg validation loss = {val_step_loss/len(val_loader):.4}, base {val_loss/len(val_loader):.4}, peak {val_peak_loss/len(val_loader):.4}")
-        writer.add_scalars("train_loss", {'total_step_loss':train_step_loss.item(), 
-                                          'base_loss':sum(losses).item(), 
-                                          'peak_loss':sum(losses_peak).item()}, global_step=i+1)
-        writer.add_scalars("targ_loss", {'base_loss':losses[0].item(), 
-                                         'peak_loss':losses_peak[0].item()}, global_step=i+1)
+        print(f"epoch training loss = {train_step_loss:.4}", f"LR = {curr_lr:.3}")
+        print(f"avg validation loss = {val_loss:.4}")
+        writer.add_scalar("train_loss", train_step_loss.item(), global_step=i+1)
+        writer.add_scalar("targ_loss", losses[0].item(), global_step=i+1)
         writer.add_scalars("side_losses", {'side1':losses[1].item(), 
                                            'side2':losses[2].item(), 
                                            'side3':losses[3].item(), 
                                            'side4':losses[4].item(), 
                                            'side5':losses[5].item(), 
                                            'side6':losses[6].item()}, global_step=i+1)
-        writer.add_scalars("side_peak_losses", {'side1':losses_peak[1].item(), 
-                                                'side2':losses_peak[2].item(), 
-                                                'side3':losses_peak[3].item(), 
-                                                'side4':losses_peak[4].item(), 
-                                                'side5':losses_peak[5].item(), 
-                                                'side6':losses_peak[6].item()}, global_step=i+1)
         writer.add_scalars("conv_weights", {'side1':last_w[0], 
                                             'side2':last_w[1],
                                             'side3':last_w[2],
                                             'side4':last_w[3],
                                             'side5':last_w[4],
                                             'side6':last_w[5]}, global_step=i+1)
-        writer.add_scalars("val_loss", {'total_step_loss':(val_step_loss/len(val_loader)).item(), 
-                                        'base loss':(val_loss/len(val_loader)).item(), 
-                                        'peak loss':(val_peak_loss/len(val_loader)).item()}, global_step=i+1)
+        writer.add_scalar("val_loss", val_loss, global_step=i+1)
         writer.add_scalar("lr", curr_lr, global_step=i+1)
 
         # save model for every best loss epoch
         if not best_loss:
-            best_loss = val_step_loss
-        elif val_step_loss < best_loss:
+            best_loss = val_loss
+        elif val_loss < best_loss:
             torch.save(model, f'../models/kappa2d_e{i+1}.pth')
             print(f"saved best loss model at epoch = {i+1}!")
-            best_loss = val_step_loss
+            best_loss = val_loss
             best_epoch = i+1
     
     print(f"best epoch number is {best_epoch}.")
@@ -282,9 +297,8 @@ def get_args():
     parser.add_argument("--wiener", default='off', type=str, choices=['off', 'add', 'only'], help='Wiener reconstruction')
     parser.add_argument("--sparse", default='off', type=str, choices=['off', 'add', 'only'], help='sparse reconstruction')
     parser.add_argument("--mcalens", default='off', type=str, choices=['off', 'add', 'only'], help='MCALens reconstruction')
-    parser.add_argument("--loss-mode", default='native', type=str, choices=['native', 'gaus'], help='loss function mode')
-    parser.add_argument("--loss-fn", default='Huber', type=str, choices=['MSE', 'Huber'], help='loss function: MSE or Huberloss')
-    parser.add_argument("--huber-delta", default=50, type=float, help='delta value for Huberloss')
+    parser.add_argument("--loss-fn", default='L1Logistic', type=str, choices=['HuberLogistic', 'L1Logistic', 'Huber'], help='loss function')
+    parser.add_argument("--huber-delta", default=0.4, type=float, help='delta value for Huberloss')
     parser.add_argument("--weight-decay", default=1e-2, type=float, help='weight decay for AdamW optimizer')
     parser.add_argument("--param-count", default=False, action='store_true', help='show model parameter count summary')
     
