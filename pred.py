@@ -10,6 +10,7 @@ import argparse
 import numpy as np
 import astropy.io.fits as fits
 from astropy.table import Table
+from kornia.geometry.transform import resize
 
 
 def save_img(pred, true, res, fname):
@@ -54,17 +55,35 @@ def main(args):
     test_step = 0
     with torch.no_grad():
         for image, target in test_dataloader:
-            image_g = image.to(device, memory_format=torch.channels_last)
-            target_g = target.to(device, memory_format=torch.channels_last)
-            y_pred = np.float32(model(image_g)[0].cpu())
-            y_true = np.float32(target_g[0].cpu())
+            image = image.to(device, memory_format=torch.channels_last)
+            target = target.to(device, memory_format=torch.channels_last)
+            outputs = model(image)
+            y_pred = np.float32(outputs[0][0].cpu())
+            y_true = np.float32(target[0].cpu())
             res = y_true - y_pred
+            '''
+            image.shape = torch.Size([1, 2, 512, 512])
+            target.shape = torch.Size([1, 1, 512, 512])
+            len(outputs) = 7
+            outputs[0].shape = torch.Size([1, 1, 512, 512]) ==> reconstructed image
+            outputs[1].shape = torch.Size([1, 1, 512, 512]) ==> Laplacian pyramid finest layer
+            outputs[2].shape = torch.Size([1, 1, 256, 256])
+            outputs[3].shape = torch.Size([1, 1, 128, 128])
+            outputs[4].shape = torch.Size([1, 1, 56, 56])
+            outputs[5].shape = torch.Size([1, 1, 32, 32])
+            outputs[6].shape = torch.Size([1, 1, 16, 16]) ==> Laplacian pyramid coarest layer
+            y_pred.shape = y_true.shape = res.shape = (1, 512, 512)
+            cube.shape = (n, 512, 512), n = shear*2 + ks + wf + sp + mca + pred + true + res + laplacian_pyramid*6
+            '''
+            cube = np.concatenate([np.float32(image[0].cpu()), y_pred, y_true, res], axis=0)
+            for y_side in outputs[1:]:
+                upsampled = resize(y_side, size=cube.shape[-2:], interpolation='nearest')
+                cube = np.concatenate([cube, np.float32(upsampled[0].cpu())], axis=0)
+            print('writeto cube shape =', cube.shape)
+
             map_name = test_cat['kappa'][test_step][0]
             base_name = os.path.basename(map_name)
             map_path = os.path.join('../result/prediction', 'pred_'+base_name)
-
-            cube = np.concatenate([np.float32(image.cpu())[0], y_pred, y_true, res], axis=0)
-            print('writeto cube shape =', cube.shape)
             fits.writeto(map_path, data=cube, overwrite=True)
             test_step += 1
             print(f'{test_step} imgs completed')

@@ -1,6 +1,6 @@
 #! -*- coding: utf-8 -*-
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '4'
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 
 from model_u2net import u2net_full
 import torch
@@ -10,6 +10,8 @@ from torchvision.transforms import GaussianBlur
 from torch.utils.data import DataLoader
 from my_dataset import ImageDataset
 from torch.utils.tensorboard import SummaryWriter
+from kornia.geometry.transform import resize
+from kornia.filters.gaussian import gaussian_blur2d
 
 import shutil
 import math
@@ -87,22 +89,33 @@ class L1LogisticLoss(nn.Module):
         return self.l1_gen_logistic(output - target)
 
 
-# def generate_peak_mask(args, target, thres_std=1):
-#         thresholds = torch.mean(target, dim=(1,2,3)) + thres_std * torch.std(target, dim=(1,2,3))
-#         thresholds = thresholds.view(args.batch_size, 1, 1, 1)
-#         target_mask = target > thresholds   # mask shape: (batchsize, 1, 512, 512)
-#         u2net_sides_mask = target_mask.repeat(7, 1, 1, 1, 1)
-#         return target_mask, u2net_sides_mask
+def build_laplacian_pyramid(tensor, max_level=5):
+    pyramid = []
+    current_layer = tensor
+    for _ in range(max_level):
+        # Apply Gaussian filter and downsample to get gaussian pyramid
+        gaussian_layer = gaussian_blur2d(current_layer, kernel_size=(5, 5), sigma=(2., 2.), border_type='reflect')
+        downsampled = resize(gaussian_layer, size=(current_layer.shape[-2]//2, current_layer.shape[-1]//2))
+
+        # Upsample and subtract to get the Laplacian
+        upsampled = resize(downsampled, size=current_layer.shape[-2:])
+        laplacian = current_layer - upsampled
+        pyramid.append(laplacian)
+
+        # Update the current layer
+        current_layer = downsampled
+
+    pyramid.append(current_layer)
+    return pyramid
 
 
 def main(args):
 
     # prepare train and validation datasets; augment data with flip & rotations; add noise
     if args.gaus_blur == True:
-        shear_gb = GaussianBlur(kernel_size=5, sigma=2.0)
+        target_gb = GaussianBlur(kernel_size=5, sigma=2.0)
     else:
-        shear_gb = None
-
+        target_gb = None
     train_data = ImageDataset(catalog=os.path.join(args.dir, 'train.ecsv'), 
                               n_galaxy=args.n_galaxy, 
                               transforms=T.Compose([
@@ -115,7 +128,7 @@ def main(args):
                                   T.sparse(args), 
                                   T.MCALens(args)
                                   ]), 
-                              gaus_blur=shear_gb
+                              gaus_blur=target_gb
                               )
     val_data = ImageDataset(catalog=os.path.join(args.dir, 'validation.ecsv'), 
                             n_galaxy=args.n_galaxy, 
@@ -126,7 +139,7 @@ def main(args):
                                 T.sparse(args), 
                                 T.MCALens(args)
                                 ]), 
-                            gaus_blur=shear_gb
+                            gaus_blur=target_gb
                             )
     # prepare train and validation dataloaders
     loader_args = dict(batch_size=args.batch_size, num_workers=args.cpu, pin_memory=True)
@@ -144,7 +157,7 @@ def main(args):
     if args.mcalens == 'add':
         in_channels += 1
     print('in_channels =', in_channels)
-    model = u2net_full(in_ch=in_channels)
+    model = u2net_full(in_ch=in_channels, mode=args.assemble_mode)
 
     if args.param_count == True:
         count_parameters(model)
@@ -183,28 +196,24 @@ def main(args):
         print(f"--------------------------Starting epoch {i+1}--------------------------")
         # training steps
         model.train()
-        for gamma, kappa in train_loader:
-            gamma = gamma.to(device, memory_format=torch.channels_last)
-            # gamma shape: (batchsize, 2, 512, 512)
-            kappa = kappa.to(device, memory_format=torch.channels_last)
-            # kappa shape: (batchsize, 1, 512, 512)
-            # kappa_mask, outputs_mask = generate_peak_mask(args, target=kappa, thres_std=1)
-            # kappa_peak = kappa * kappa_mask
-
+        for image, target in train_loader:
+            image = image.to(device, memory_format=torch.channels_last)
+            # image shape: (batchsize, 3 or 4, 512, 512)
+            target = target.to(device, memory_format=torch.channels_last)
+            # target shape: (batchsize, 1, 512, 512)
+            
             with torch.cuda.amp.autocast(enabled=scaler is not None):
-                outputs = model(gamma)
-                # outputs_peak = [outputs[n] * outputs_mask[n] for n in range(len(outputs))]
-
-                # loss_targ = loss_fn(outputs[0], kappa)
-                # loss_targ_peak = loss_fn(outputs_peak[0], kappa_peak)
-                # native mode: based on true kappa for every side output
-                losses = [loss_fn(outputs[j], kappa) for j in range(len(outputs))]
-                # losses.insert(0, loss_targ)
-                # losses_peak = [loss_fn(outputs_peak[k], kappa_peak) for k in range(len(outputs))]
-                # losses_peak.insert(0, loss_targ_peak)
+                outputs = model(image)
+                # native mode: based on true target for every side output
+                if args.assemble_mode == '1x1conv':
+                    losses = [loss_fn(outputs[j], target) for j in range(len(outputs))]
+                elif args.assemble_mode == 'laplacian_pyramid':
+                    target_pyr = build_laplacian_pyramid(target, max_level=5)
+                    losses = [loss_fn(outputs[j+1], target_pyr[j]) for j in range(len(target_pyr))]
+                    loss_targ = loss_fn(outputs[0], target)
+                    losses.insert(0, loss_targ)
                 
                 train_step_loss = sum(losses)
-                # train_step_loss = sum(losses) + sum(losses_peak) * 5
 
             # optimizer step
             optimizer.zero_grad()
@@ -228,18 +237,13 @@ def main(args):
         
         # validation steps
         model.eval()
-        val_loss, val_peak_loss = 0.0, 0.0
+        val_loss = 0.0
         with torch.no_grad():
-            for gamma, kappa in val_loader:
-                gamma = gamma.to(device, memory_format=torch.channels_last)
-                kappa = kappa.to(device, memory_format=torch.channels_last)
-                # kappa_mask, _ = generate_peak_mask(args, target=kappa, thres_std=1)
-                # kappa_peak = kappa * kappa_mask
-                outputs = model(gamma)
-                # outputs_peak = outputs * kappa_mask
-                val_loss += loss_fn(outputs, kappa).item() / len(val_loader)
-                # val_peak_loss += loss_fn(outputs_peak, kappa_peak)
-            # val_step_loss = val_loss + val_peak_loss * 5
+            for image, target in val_loader:
+                image = image.to(device, memory_format=torch.channels_last)
+                target = target.to(device, memory_format=torch.channels_last)
+                outputs = model(image)
+                val_loss += loss_fn(outputs[0], target).item() / len(val_loader)
 
         # printing final 1x1 convolution layer (learned weights for each side outputs)
         for name, param in model.named_parameters():
@@ -297,8 +301,9 @@ def get_args():
     parser.add_argument("--wiener", default='off', type=str, choices=['off', 'add', 'only'], help='Wiener reconstruction')
     parser.add_argument("--sparse", default='off', type=str, choices=['off', 'add', 'only'], help='sparse reconstruction')
     parser.add_argument("--mcalens", default='off', type=str, choices=['off', 'add', 'only'], help='MCALens reconstruction')
-    parser.add_argument("--loss-fn", default='L1Logistic', type=str, choices=['HuberLogistic', 'L1Logistic', 'Huber'], help='loss function')
-    parser.add_argument("--huber-delta", default=0.4, type=float, help='delta value for Huberloss')
+    parser.add_argument("--loss-fn", default='Huber', type=str, choices=['HuberLogistic', 'L1Logistic', 'Huber'], help='loss function')
+    parser.add_argument("--assemble-mode", default='1x1conv', type=str, choices=['1x1conv', 'laplacian_pyr'], help='experimental feature')
+    parser.add_argument("--huber-delta", default=50, type=float, help='delta value for Huberloss')
     parser.add_argument("--weight-decay", default=1e-2, type=float, help='weight decay for AdamW optimizer')
     parser.add_argument("--param-count", default=False, action='store_true', help='show model parameter count summary')
     

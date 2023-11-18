@@ -2,6 +2,7 @@ from typing import Union, List
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from kornia.geometry.transform import resize
 
 
 class ConvBNReLU(nn.Module):
@@ -105,8 +106,10 @@ class RSU4F(nn.Module):
 
 
 class U2Net(nn.Module):
-    def __init__(self, cfg: dict, out_ch: int = 1):
+    def __init__(self, cfg: dict, out_ch: int = 1, mode: str = '1x1conv'):
         super().__init__()
+        assert mode in ['1x1conv', 'laplacian_pyr']
+        self.mode = mode
         assert "encode" in cfg
         assert "decode" in cfg
         self.encode_num = len(cfg["encode"])
@@ -160,22 +163,37 @@ class U2Net(nn.Module):
             x = m(torch.concat([x, x2], dim=1))
             decode_outputs.insert(0, x)
 
-        # collect side outputs
-        side_outputs = []
-        for m in self.side_modules:
-            x = decode_outputs.pop()
-            x = F.interpolate(m(x), size=[h, w], mode='bilinear', align_corners=False)
-            side_outputs.insert(0, x)
-
-        x = self.out_conv(torch.concat(side_outputs, dim=1))
-
-        if self.training:
+        if self.mode == '1x1conv':
+            # collect side outputs
+            side_outputs = []
+            for m in self.side_modules:
+                x = decode_outputs.pop()
+                x = F.interpolate(m(x), size=[h, w], mode='bilinear', align_corners=False)
+                side_outputs.insert(0, x)
+            x = self.out_conv(torch.concat(side_outputs, dim=1))
             return [x] + side_outputs
-        else:
-            return x
+
+        elif self.mode == 'laplacian_pyr':
+            # collect side outputs (as a Laplacian pyramid)
+            lap_pyramid = []
+            for i, m in enumerate(self.side_modules):
+                x = decode_outputs.pop()
+                # height and width of the current Laplacian pyramid level
+                pyr_h, pyr_w = h // 2**(5-i), w // 2**(5-i)
+                x = F.interpolate(m(x), size=[pyr_h, pyr_w], mode='bilinear', align_corners=False)
+                lap_pyramid.insert(0, x)
+
+            # reconstruct original image resolution from Laplacian pyramid
+            x = lap_pyramid[-1]
+            for laplacian in reversed(lap_pyramid[:-1]):
+                # Upsample the current image
+                upsampled = resize(x, size=laplacian.shape[-2:])
+                # Add the Laplacian layer
+                x = upsampled + laplacian
+            return [x] + lap_pyramid
 
 
-def u2net_full(out_ch: int = 1, in_ch: int = 2):
+def u2net_full(out_ch: int = 1, in_ch: int = 2, mode: str = '1x1conv'):
     cfg = {
         # height, in_ch, mid_ch, out_ch, RSU4F, side
         "encode": [[7, in_ch, 32, 64, False, False],      # En1
@@ -192,4 +210,4 @@ def u2net_full(out_ch: int = 1, in_ch: int = 2):
                    [7, 128, 16, 64, False, True]]     # De1
     }
 
-    return U2Net(cfg, out_ch)
+    return U2Net(cfg, out_ch, mode=mode)
