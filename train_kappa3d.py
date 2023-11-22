@@ -221,7 +221,7 @@ def main(args):
                 # native mode: based on true target for every side output
                 if args.assemble_mode == '1x1conv':
                     losses = [loss_fn(outputs[j], target) for j in range(len(outputs))]
-                elif args.assemble_mode == 'laplacian_pyramid':
+                elif args.assemble_mode == 'laplacian_pyr':
                     target_pyr = build_laplacian_pyramid(target, max_level=5)
                     losses = [loss_fn(outputs[j+1], target_pyr[j]) for j in range(len(target_pyr))]
                     loss_targ = loss_fn(outputs[0], target)

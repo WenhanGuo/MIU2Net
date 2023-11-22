@@ -37,17 +37,22 @@ def make_cube(args, fname):
         cube = f[0].data
         shear1 = cube[0]
         shear2 = cube[1]
-        ks = cube[2]
-        wiener = cube[3]
-        if args.have_mcalens == True:
-            mcalens = cube[4]
-            pred = cube[5]
-            true = cube[6]
-            res = cube[7]
+        if args.bare == True:
+            pred = cube[2]
+            true = cube[3]
+            res = cube[4]
         else:
-            pred = cube[4]
-            true = cube[5]
-            res = cube[6]
+            ks = cube[2]
+            wiener = cube[3]
+            if args.have_mcalens == True:
+                mcalens = cube[4]
+                pred = cube[5]
+                true = cube[6]
+                res = cube[7]
+            else:
+                pred = cube[4]
+                true = cube[5]
+                res = cube[6]
 
     # initialize CosmoStat shear class
     D = shear_data()
@@ -63,6 +68,18 @@ def make_cube(args, fname):
     psWT_gen1 = pysparse.MRStarlet(bord=1, gen2=False, nb_procs=1, verbose=0)
     psWT_gen2 = pysparse.MRStarlet(bord=1, gen2=True, nb_procs=1, verbose=0)
     M.init_massmap(nx=512, ny=512, pass_class=[psWT_gen1, psWT_gen2])
+    p_signal = fits.open('./signal_power_spectrum.fits')[0].data
+    p_noise = fits.open('./noise_power_spectrum_g50.fits')[0].data
+
+    if args.bare == True:
+        # ks reconstruction
+        ks =  M.g2k(D.g1, D.g2, pass_class=[psWT_gen1, psWT_gen2])
+
+        # wiener filtering
+        wiener, reti = M.wiener(D.g1, D.g2, 
+                                PowSpecSignal=p_signal, 
+                                PowSpecNoise=p_noise, 
+                                pass_class=[psWT_gen1, psWT_gen2])
 
     # sparse reconstruction with a 5 sigma detection
     sparse, ti = M.sparse_recons(InshearData=D, 
@@ -75,7 +92,6 @@ def make_cube(args, fname):
 
     if args.have_mcalens == False:
         # mcalens reconstruction
-        p_signal = fits.open('./signal_power_spectrum.fits')[0].data
         mcalens, k1i5, k2r5, k2i = M.sparse_wiener_filtering(InshearData=D, 
                                                         PowSpecSignal=p_signal,
                                                         niter=12, 
@@ -93,9 +109,10 @@ def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/kappa_map/result/prediction', type=str)
     parser.add_argument("--save-dir", default='/share/lirui/Wenhan/WL/kappa_map/result/master_cubes', type=str)
-    parser.add_argument("--cpu", default=32, type=int, help='number of cpu cores to use for multiprocessing')
+    parser.add_argument("--cpu", default=20, type=int, help='number of cpu cores to use for multiprocessing')
     parser.add_argument("--n-galaxy", default=50, type=int)
     parser.add_argument("--have-mcalens", default=False, action='store_true')
+    parser.add_argument("--bare", default=False, action='store_true')
     return parser.parse_args()
 
 

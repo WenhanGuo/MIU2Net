@@ -130,15 +130,12 @@ def build_laplacian_pyramid(tensor, max_levels=5):
         # Apply Gaussian filter and downsample
         gaussian_layer = gaussian_blur2d(current_layer, kernel_size=(5, 5), sigma=(2., 2.), border_type='reflect')
         downsampled = resize(gaussian_layer, size=(current_layer.shape[-2]//2, current_layer.shape[-1]//2))
-
         # Upsample and subtract to get the Laplacian
         upsampled = resize(downsampled, size=current_layer.shape[-2:])
         laplacian = current_layer - upsampled
         pyramid.append(laplacian)
-
         # Update the current layer
         current_layer = downsampled
-
     pyramid.append(current_layer)
     return pyramid
 
