@@ -1,177 +1,251 @@
 #! -*- coding: utf-8 -*-
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '4,5'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1,2'
 
 from model import UNet
 import torch
 from torch import nn
-from torchvision.transforms import Compose, ToTensor
-from torch.utils.data import Dataset, DataLoader
+import transforms as T
+from torchvision.transforms import GaussianBlur
+from torch.utils.data import DataLoader
+from my_dataset import ImageDataset
 from torch.utils.tensorboard import SummaryWriter
+from kornia.geometry.transform import resize
 
-import numpy as np
-import pandas as pd
-from glob import glob1
-import astropy.io.fits as fits
+import shutil
+import math
+from prettytable import PrettyTable
+import datetime
 
-# define training device (cpu/gpu)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print('device =', device)
 
-# Dataset class for our own data structure
-class ImageDataset(Dataset):
-    def __init__(self, catalog, data_dir, transform=None, target_transform=None):
+def count_parameters(model):
+    table = PrettyTable(["Modules", "Parameters"])
+    total_params = 0
+    for name, parameter in model.named_parameters():
+        if not parameter.requires_grad: continue
+        params = parameter.numel()
+        table.add_row([name, params])
+        total_params += params
+    print(table)
+    print(f"Total Trainable Params: {total_params}")
+    return total_params
+
+
+def create_lr_scheduler(optimizer,
+                        num_step: int,
+                        epochs: int,
+                        warmup=True,
+                        warmup_epochs=1,
+                        warmup_factor=1e-3,
+                        end_factor=1e-6):
+    assert num_step > 0 and epochs > 0
+    if warmup is False:
+        warmup_epochs = 0
+
+    def f(x):
         """
-        catalog: name of .csv file containing image names to be read
-        data_dir: path to data directory containing gamma1, gamma2, kappa folders
-        transform: transformations to input data (gamma) prior to training
-        target_transform: transformation to target data (kappa) prior to training 
+        根据step数返回一个学习率倍率因子, 
+        注意在训练开始之前, pytorch会提前调用一次lr_scheduler.step()方法
         """
-        self.img_names = pd.read_csv(catalog)
-        self.data_dir = data_dir
-        self.transform = transform
-        self.target_transform = target_transform
-    
-    def __len__(self):
-        return len(self.img_names)
-    
-    def read_img(self, idx, img_type=['gamma1', 'gamma2', 'kappa']):
-        img_name = self.img_names[img_type][idx]   # get single image name
-        img_path = os.path.join(self.data_dir, img_type, img_name)
-        with fits.open(img_path, memmap=False) as f:
-            img = f[0].data   # read image into numpy array
-        return np.float32(img)   # force apply float32 to resolve endian conflict
-    
-    def __getitem__(self, idx):
-        # read in images
-        gamma1 = self.read_img(idx, img_type='gamma1')
-        gamma2 = self.read_img(idx, img_type='gamma2')
-        kappa = self.read_img(idx, img_type='kappa')
-        # reformat data shapes
-        gamma = np.array([gamma1, gamma2])
-        gamma = np.moveaxis(gamma, 0, 2)
-        kappa = np.expand_dims(kappa, 2)
-        # apply transforms
-        if self.transform:
-            gamma = self.transform(gamma)
-        if self.target_transform:
-            kappa = self.target_transform(kappa)
-        return gamma, kappa
+        if warmup is True and x <= (warmup_epochs * num_step):
+            alpha = float(x) / (warmup_epochs * num_step)
+            # warmup过程中lr倍率因子从warmup_factor -> 1
+            return warmup_factor * (1 - alpha) + alpha
+        else:
+            current_step = (x - warmup_epochs * num_step)
+            cosine_steps = (epochs - warmup_epochs) * num_step
+            # warmup后lr倍率因子从1 -> end_factor
+            return ((1 + math.cos(current_step * math.pi / cosine_steps)) / 2) * (1 - end_factor) + end_factor
+
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=f)
 
 
-# add gaussian noise to shear
-class AddGaussianNoise(object):
-    def __init__(self, mean=0., std=0.0424):
-        """
-        mean and standard deviation for the gaussian noise to be added to shear
-        for 50 galaxies per square arcmin, std = 0.3/sqrt(50) = 0.0424
-        """
-        self.mean = mean
-        self.std = std
+def main(args):
 
-    def __call__(self, tensor):
-        return tensor + torch.randn(tensor.size()) * self.std + self.mean
-
-
-# set hyperparameters
-def set_parameters():
-    global epoch, batch_size, learning_rate, gamma, weight_decay, delta
-    global data_dir
-
-    epoch = 60
-    batch_size = 64
-    learning_rate = 1e-4
-    weight_decay = 1e-3
-    delta = 0.01
-
-    data_dir = '/share/lirui/Wenhan/WL/data_new'
-    return
-
-
-if __name__ == '__main__':
-    # set hyperparameters
-    set_parameters()
-
-    # prepare train and validation datasets
-    ds_args = dict(data_dir=data_dir, 
-                   transform=Compose([ToTensor(), 
-                                    #   AddGaussianNoise(mean=0, std=0.0424)
-                                    #   AddGaussianNoise(mean=0, std=0.0671)
-                                      AddGaussianNoise(mean=0, std=0.0949)
-                                      ]), 
-                   target_transform=Compose([ToTensor()]))
-    train_data = ImageDataset(catalog=os.path.join(data_dir, 'train.csv'), **ds_args)
-    val_data = ImageDataset(catalog=os.path.join(data_dir, 'validation.csv'), **ds_args)
+    # prepare train and validation datasets; augment data with flip & rotations; add noise
+    if args.gaus_blur == True:
+        target_gb = GaussianBlur(kernel_size=5, sigma=2.0)
+    else:
+        target_gb = None
+    train_data = ImageDataset(catalog=os.path.join(args.dir, 'train.ecsv'), 
+                              args=args, 
+                              transforms=T.Compose([
+                                  T.KS_rec(args), 
+                                  T.RandomHorizontalFlip(prob=0.5), 
+                                  T.RandomVerticalFlip(prob=0.5), 
+                                  T.DiscreteRotation(angles=[0, 90, 180, 270]), 
+                                  T.RandomCrop(size=512), 
+                                  T.Wiener(args), 
+                                  T.sparse(args), 
+                                  T.MCALens(args)
+                                  ]), 
+                              gaus_blur=target_gb
+                              )
+    val_data = ImageDataset(catalog=os.path.join(args.dir, 'validation.ecsv'), 
+                            args=args, 
+                            transforms=T.Compose([
+                                T.KS_rec(args), 
+                                T.RandomCrop(size=512), 
+                                T.Wiener(args), 
+                                T.sparse(args), 
+                                T.MCALens(args)
+                                ]), 
+                            gaus_blur=target_gb
+                            )
     # prepare train and validation dataloaders
-    loader_args = dict(batch_size=batch_size, num_workers=os.cpu_count(), pin_memory=True)
-    train_loader = DataLoader(train_data, shuffle=True, **loader_args)
+    loader_args = dict(batch_size=args.batch_size, num_workers=args.cpu, pin_memory=True)
+    train_loader = DataLoader(train_data, shuffle=True, drop_last=True, **loader_args)
     val_loader = DataLoader(val_data, shuffle=True, drop_last=True, **loader_args)
 
     # initialize UNet model
+    in_channels = 2
+    if args.ks == 'add':
+        in_channels += 1
+    if args.wiener == 'add':
+        in_channels += 1
+    if args.sparse == 'add':
+        in_channels += 1
+    if args.mcalens == 'add':
+        in_channels += 1
+    elif args.ks == 'only' or args.wiener == 'only':
+        in_channels = 1
+    print('in_channels =', in_channels)
     model = UNet()
-    model = model.to(memory_format=torch.channels_last)
+
+    if args.param_count == True:
+        count_parameters(model)
     # data parallel training on multiple GPUs (restrained by cuda visible devices)
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
-    model.to(device=device)
+    model.to(device, memory_format=torch.channels_last)
     torch.cuda.empty_cache()
 
     # setting loss function, optimizer, and scheduler
-    loss_fn = nn.HuberLoss(delta=delta)
+    loss_fn = nn.HuberLoss(delta=args.huber_delta)
     loss_fn = loss_fn.to(device)
-    optimizer = torch.optim.AdamW(params=model.parameters(), lr=learning_rate, 
-                                  weight_decay=weight_decay)
-    # optimizer = torch.optim.Adam(params=model.parameters(), lr=learning_rate)
+
+    # setting optimizer & lr scheduler
+    optimizer = torch.optim.AdamW(params=model.parameters(), lr=args.lr, 
+                                  weight_decay=args.weight_decay)
+    lr_scheduler = create_lr_scheduler(optimizer, len(train_loader), args.epochs,
+                                       warmup=True, warmup_epochs=3)
+    # Use torch.cuda.amp for mixed precision training
+    scaler = torch.cuda.amp.GradScaler() if args.mixed_precision == True else None
 
     # use tensorboard to visualize computation
-    writer = SummaryWriter("logs_train")
+    writer = SummaryWriter('../tlogs_unet')
     # delete existing tensorboard logs
-    old_logs = glob1('./logs_train', '*')
-    for f in old_logs:
-        os.remove(os.path.join(os.getcwd(), 'logs_train', f))
-
+    shutil.rmtree('../tlogs_unet')
     # begin training
     total_train_step = 0
-    for i in range(epoch):
+    best_loss = False
+    for i in range(args.epochs):
         print(f"--------------------------Starting epoch {i+1}--------------------------")
-        train_loss, val_loss = 0.0, 0.0
-
         # training steps
         model.train()
-        for gamma, kappa in train_loader:
-            gamma = gamma.to(device, memory_format=torch.channels_last)
-            kappa = kappa.to(device, memory_format=torch.channels_last)
-            outputs = model(gamma)
-            train_step_loss = loss_fn(outputs, kappa)
+        for image, target in train_loader:
+            image = image.to(device, memory_format=torch.channels_last)
+            # image shape: (batchsize, 3 or 4, 512, 512)
+            target = target.to(device, memory_format=torch.channels_last)
+            # target shape: (batchsize, 1, 512, 512)
+            
+            with torch.cuda.amp.autocast(enabled=scaler is not None):
+                output = model(image)
+                resize_output = resize(output, size=(args.kappa_size, args.kappa_size))
+                resize_target = resize(target, size=(args.kappa_size, args.kappa_size))
+                train_step_loss = loss_fn(resize_output, resize_target)
 
             # optimizer step
             optimizer.zero_grad()
-            train_step_loss.backward()
-            optimizer.step()
-            train_loss += train_step_loss.item()
+            if scaler is not None:
+                scaler.scale(train_step_loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                train_step_loss.backward()
+                optimizer.step()
+            lr_scheduler.step()
+            curr_lr = optimizer.param_groups[0]["lr"]
 
             total_train_step += 1
-            if total_train_step % 50 == 0:
+            # print 3 train losses per epoch
+            if total_train_step % (len(train_loader) // 3) == 0:
                 print(f"train step: {total_train_step}, \
-                      current loss: {train_step_loss.item()}")
+                      current loss: {train_step_loss.item():.3}")
         
         # validation steps
         model.eval()
+        val_loss = 0.0
         with torch.no_grad():
-            for gamma, kappa in val_loader:
-                gamma = gamma.to(device, memory_format=torch.channels_last)
-                kappa = kappa.to(device, memory_format=torch.channels_last)
-                outputs = model(gamma)
-                val_step_loss = loss_fn(outputs, kappa)
-                val_loss += val_step_loss.item()
-        # curr_lr = optimizer.param_groups[0]['lr']
+            for image, target in val_loader:
+                image = image.to(device, memory_format=torch.channels_last)
+                target = target.to(device, memory_format=torch.channels_last)
+                output = model(image)
+                val_loss += loss_fn(output, target).item() / len(val_loader)
 
         # printing epoch stats & writing to tensorboard
-        print(f"epoch training loss = {train_loss/len(train_loader)}")
-        print(f"avg validation loss = {val_loss/len(val_loader)}")
-        writer.add_scalar("train_loss", train_loss/len(train_loader), global_step=i+1)
-        writer.add_scalar("val_loss", val_loss/len(val_loader), global_step=i+1)
+        print(f"epoch training loss = {train_step_loss:.4}", f"LR = {curr_lr:.3}")
+        print(f"avg validation loss = {val_loss:.4}")
+        writer.add_scalar("train_loss", train_step_loss.item(), global_step=i+1)
+        writer.add_scalar("val_loss", val_loss, global_step=i+1)
+        writer.add_scalar("lr", curr_lr, global_step=i+1)
 
-        torch.save(model, f'./models/wenhan_epoch{i+1}.pth')
-
+        # save model for every best loss epoch
+        if not best_loss:
+            best_loss = val_loss
+        elif val_loss < best_loss:
+            torch.save(model, f'../models/kappa2d_e{i+1}.pth')
+            print(f"saved best loss model at epoch = {i+1}!")
+            best_loss = val_loss
+            best_epoch = i+1
+    
+    print(f"best epoch number is {best_epoch}.")
     writer.close()
+
+
+def get_args():
+    import argparse
+    parser = argparse.ArgumentParser(description='Train U2Net')
+    parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/data_1024_2d', type=str, help='data directory')
+    parser.add_argument("--cpu", default=32, type=int, help='number of cpu cores to use')
+    parser.add_argument("-g", "--n-galaxy", default=50, type=float, help='number of galaxies per arcmin (to determine noise level)')
+    parser.add_argument("-e", "--epochs", default=256, type=int, help='number of total epochs to train')
+    parser.add_argument("-b", "--batch-size", default=32, type=int, help='batch size')
+    parser.add_argument("--lr", default=1e-4, type=float, help='initial learning rate')
+    parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
+    parser.add_argument("--kappa-size", default=512, type=int, help='kappa size to downsample. 512x512 is original kappa')
+    parser.add_argument("--mixed-precision", default=False, action='store_true', help='Use torch.cuda.amp for mixed precision training')
+
+    parser.add_argument("--ks", default='off', type=str, choices=['off', 'add', 'only'], help='KS93 deconvolution (no KS, KS as an extra channel, no shear and KS only)')
+    parser.add_argument("--wiener", default='off', type=str, choices=['off', 'add', 'only'], help='Wiener reconstruction')
+    parser.add_argument("--sparse", default='off', type=str, choices=['off', 'add', 'only'], help='sparse reconstruction')
+    parser.add_argument("--mcalens", default='off', type=str, choices=['off', 'add', 'only'], help='MCALens reconstruction')
+
+    parser.add_argument("--loss-fn", default='Huber', type=str, choices=['l1', 'Huber', 'SSIM', 'MS-SSIM', 'l1-SSIM', 'l1-MS-SSIM', 'FFL', 'HuberFFL'], help='loss function')
+    parser.add_argument("--wiener-res", default=False, action='store_true', help='if the target is true - wiener')
+    parser.add_argument("--assemble-mode", default='1x1conv', type=str, choices=['1x1conv', 'laplacian_pyr'], help='experimental feature')
+    parser.add_argument("--huber-delta", default=50.0, type=float, help='delta value for Huberloss')
+    parser.add_argument("--ffl-weight", default=2.0, type=float, help='weight for Focal Frequency Loss')
+    parser.add_argument("--ffl-alpha", default=1.0, type=float, help='alpha for Focal Frequency Loss')
+    parser.add_argument("--weight-decay", default=1e-2, type=float, help='weight decay for AdamW optimizer')
+    parser.add_argument("--param-count", default=False, action='store_true', help='show model parameter count summary')
+
+    parser.add_argument("--save-noisy-shear", default=False, action='store_true', help='write shear with added gaussian noise to disk')
+    parser.add_argument("--save-noisy-shear-dir", default='/share/lirui/Wenhan/WL/kappa_map/result/noisy_shear', type=str)
+
+    return parser.parse_args()
+
+
+if __name__ == '__main__':
+    args = get_args()
+    table = PrettyTable(["Arguments", "Values"])
+    table.add_row(['start_time', datetime.datetime.now()])
+    for arg in vars(args):
+        table.add_row([arg, getattr(args, arg)])
+    print(table)
+
+    # define training device (cpu/gpu)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print('device =', device)
+
+    main(args)
