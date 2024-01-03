@@ -88,6 +88,16 @@ class RandomCrop(object):
         return image, target
 
 
+class CenterCrop(object):
+    def __init__(self, size: int):
+        self.size = size
+
+    def __call__(self, image, target):
+        image = F.center_crop(image, self.size)
+        target = F.center_crop(target, self.size)
+        return image, target
+
+
 # add gaussian noise to shear
 class AddGaussianNoise(object):
     def __init__(self, n_galaxy, mean=0.):
@@ -117,7 +127,7 @@ class KS_rec(object):
     reconstruct kappa map from shear using Kaiser-Squires deconvolution.
     """
     def __init__(self, args):
-        self.activate = args.ks
+        self.mode = args.ks
         self.M = massmap2d(name='mass_ks')
         self.psWT_gen1 = pysparse.MRStarlet(bord=1, gen2=False, nb_procs=1, verbose=0)
         self.psWT_gen2 = pysparse.MRStarlet(bord=1, gen2=True, nb_procs=1, verbose=0)
@@ -129,10 +139,10 @@ class KS_rec(object):
         return ks
 
     def __call__(self, image, target):
-        if self.activate == 'off':
+        if self.mode == 'off':
             return image, target
         
-        elif self.activate == 'add':
+        elif self.mode == 'add':
             # perdict kappa using KS and add it as a 3rd channel to gamma
             # if ks add: image shape = torch.Size([3, 512, 512]); last channel is ks map
             ks_kappa = self.shear_rec(-image[0], image[1])   # negative sign is important
@@ -140,7 +150,7 @@ class KS_rec(object):
             image = torch.concat((image, ks_kappa.unsqueeze(0)), dim=0)
             return image, target
             
-        elif self.activate == 'only':
+        elif self.mode == 'only':
             # perdict kappa using KS and remove shear information
             # if ks only: image shape = torch.Size([1, 512, 512])
             ks_kappa = self.shear_rec(-image[0], image[1])   # negative sign is important
@@ -156,7 +166,7 @@ class Wiener(object):
     reconstruct kappa map from shear using Wiener filtering.
     """
     def __init__(self, args):
-        self.activate = args.wiener
+        self.mode = args.wiener
         self.p_signal = fits.open('./signal_power_spectrum.fits')[0].data
         if args.n_galaxy == 50:
             self.p_noise = fits.open('./noise_power_spectrum_g50.fits')[0].data
@@ -177,20 +187,20 @@ class Wiener(object):
         return retr, reti
 
     def __call__(self, image, target):
-        if self.activate == 'off':
+        if self.mode == 'off':
             return image, target
         
-        elif self.activate == 'add':
+        elif self.mode == 'add':
             wf_kappa, _ = self.wiener(-image[0], image[1])   # negative sign is important
             wf_kappa = np.float32(wf_kappa)
             image = np.concatenate([image, np.expand_dims(wf_kappa, axis=0)], axis=0)
             return image, target
         
-        elif self.activate == 'only':
+        elif self.mode == 'only':        
             wf_kappa, _ = self.wiener(-image[0], image[1])   # negative sign is important
-            wf_kappa = np.float32(wf_kappa)
-            # image = wf_kappa.unsqueeze(0)
-            image = np.expand_dims(wf_kappa, axis=0)
+            wf_kappa = torch.FloatTensor(wf_kappa)
+            image = wf_kappa.unsqueeze(0)
+            # image = np.expand_dims(wf_kappa, axis=0)
             return image, target
 
 
@@ -199,7 +209,7 @@ class sparse(object):
     reconstruct kappa map from shear using sparse reconstruction.
     """
     def __init__(self, args):
-        self.activate = args.sparse
+        self.mode = args.sparse
         self.M = massmap2d(name='mass_sparse')
         self.psWT_gen1 = pysparse.MRStarlet(bord=1, gen2=False, nb_procs=1, verbose=0)
         self.psWT_gen2 = pysparse.MRStarlet(bord=1, gen2=True, nb_procs=1, verbose=0)
@@ -231,10 +241,10 @@ class sparse(object):
         return ksr5, ti
 
     def __call__(self, image, target):
-        if self.activate == 'off':
+        if self.mode == 'off':
             return image, target
         
-        elif self.activate == 'add':
+        elif self.mode == 'add':
             sp_kappa, _ = self.sparse(np.float32(-image[0]), np.float32(image[1]))   # negative sign is important
             sp_kappa = np.float32(sp_kappa)
             image = np.concatenate([image, np.expand_dims(sp_kappa, axis=0)], axis=0)
@@ -246,7 +256,7 @@ class MCALens(object):
     reconstruct kappa map from shear using MCALens reconstruction.
     """
     def __init__(self, args):
-        self.activate = args.mcalens
+        self.mode = args.mcalens
         self.p_signal = fits.open('./signal_power_spectrum.fits')[0].data
         self.M = massmap2d(name='mass_mcalens')
         self.psWT_gen1 = pysparse.MRStarlet(bord=1, gen2=False, nb_procs=1, verbose=0)
@@ -280,10 +290,10 @@ class MCALens(object):
         return k1r5, k1i5, k2r5, k2i
 
     def __call__(self, image, target):
-        if self.activate == 'off':
+        if self.mode == 'off':
             return image, target
         
-        elif self.activate == 'add':
+        elif self.mode == 'add':
             mca_kappa, _, _, _ = self.mcalens(np.float32(-image[0]), np.float32(image[1]))   # negative sign is important
             # mca_kappa = torch.FloatTensor(mca_kappa)
             mca_kappa = np.float32(mca_kappa)
