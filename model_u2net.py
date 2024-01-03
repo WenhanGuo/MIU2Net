@@ -2,7 +2,7 @@ from typing import Union, List
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from kornia.geometry.transform import resize
+from torchvision.transforms.functional import resize
 
 
 class ConvBNReLU(nn.Module):
