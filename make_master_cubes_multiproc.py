@@ -1,3 +1,5 @@
+import torch
+from torchvision.transforms.functional import resize
 import os
 import multiprocessing
 import numpy as np
@@ -19,6 +21,10 @@ def shape_noise(n_galaxy):
     print('shape noise std =', std)
     return std
 
+def downsample(image, size):
+    image = torch.tensor(np.float32(image))
+    image = resize(image.unsqueeze(0), size=size)
+    return image.numpy().astype(np.float32)[0]
 
 def save_cube(true, ml, ks, wiener, sparse, mcalens, save_dir, save_name):
     true1 = np.expand_dims(true, axis=0)
@@ -33,53 +39,52 @@ def save_cube(true, ml, ks, wiener, sparse, mcalens, save_dir, save_name):
 
 
 def make_cube(args, fname):
-    with fits.open(os.path.join(args.dir, fname)) as f:
+    basename = os.path.basename(fname)
+    noisy_shear_name = basename[5:-13] + 'noisy_shear.fits'
+    noisy_shear_path = os.path.join(args.shear_dir, noisy_shear_name)
+    with fits.open(noisy_shear_path) as f:
         cube = f[0].data
         shear1 = cube[0]
         shear2 = cube[1]
-        if args.bare == True:
-            pred = cube[2]
-            true = cube[3]
-            res = cube[4]
-        else:
-            ks = cube[2]
-            wiener = cube[3]
-            if args.have_mcalens == True:
-                mcalens = cube[4]
-                pred = cube[5]
-                true = cube[6]
-                res = cube[7]
-            else:
-                pred = cube[4]
-                true = cube[5]
-                res = cube[6]
+    with fits.open(os.path.join(args.dir, fname)) as f:
+        cube = f[0].data
+        pred = cube[args.pred_id]
+        true = cube[args.true_id]
 
     # initialize CosmoStat shear class
     D = shear_data()
-    D.g1 = - shear1
-    D.g2 = shear2
+    D.g1 = np.float32(-shear1)   # negative sign is important
+    D.g2 = np.float32(shear2)
     noise_std = shape_noise(n_galaxy=args.n_galaxy)
-    CovMat = np.ones((512, 512)) * (noise_std**2)
+    CovMat = np.ones((args.crop, args.crop)) * (noise_std**2)
     D.Ncov = CovMat
-    D.nx, D.ny = 512, 512
+    D.nx, D.ny = args.crop, args.crop
 
     # create the mass mapping structure and initialize it
     M = massmap2d(name='mass')
     psWT_gen1 = pysparse.MRStarlet(bord=1, gen2=False, nb_procs=1, verbose=0)
     psWT_gen2 = pysparse.MRStarlet(bord=1, gen2=True, nb_procs=1, verbose=0)
-    M.init_massmap(nx=512, ny=512, pass_class=[psWT_gen1, psWT_gen2])
+    M.init_massmap(nx=args.crop, ny=args.crop, pass_class=[psWT_gen1, psWT_gen2])
     p_signal = fits.open('./signal_power_spectrum.fits')[0].data
-    p_noise = fits.open('./noise_power_spectrum_g50.fits')[0].data
+    if args.n_galaxy == 1059:
+        p_noise = fits.open('./noise_power_spectrum_g1059.fits')[0].data
+    if args.n_galaxy == 50:
+        p_noise = fits.open('./noise_power_spectrum_g50.fits')[0].data
+    elif args.n_galaxy == 30:
+        p_noise = fits.open('./noise_power_spectrum_g30.fits')[0].data
+    elif args.n_galaxy == 20:
+        p_noise = fits.open('./noise_power_spectrum_g20.fits')[0].data
+    elif args.n_galaxy == 5:
+        p_noise = fits.open('./noise_power_spectrum_g5.fits')[0].data
 
-    if args.bare == True:
-        # ks reconstruction
-        ks =  M.g2k(D.g1, D.g2, pass_class=[psWT_gen1, psWT_gen2])
+    # ks reconstruction
+    ks =  M.g2k(D.g1, D.g2, pass_class=[psWT_gen1, psWT_gen2])
 
-        # wiener filtering
-        wiener, reti = M.wiener(D.g1, D.g2, 
-                                PowSpecSignal=p_signal, 
-                                PowSpecNoise=p_noise, 
-                                pass_class=[psWT_gen1, psWT_gen2])
+    # wiener filtering
+    wiener, reti = M.wiener(D.g1, D.g2, 
+                            PowSpecSignal=p_signal, 
+                            PowSpecNoise=p_noise, 
+                            pass_class=[psWT_gen1, psWT_gen2])
 
     # sparse reconstruction with a 5 sigma detection
     sparse, ti = M.sparse_recons(InshearData=D, 
@@ -90,16 +95,23 @@ def make_cube(args, fname):
                                Inpaint=False, 
                                pass_class=[psWT_gen1, psWT_gen2])
 
-    if args.have_mcalens == False:
-        # mcalens reconstruction
-        mcalens, k1i5, k2r5, k2i = M.sparse_wiener_filtering(InshearData=D, 
-                                                        PowSpecSignal=p_signal,
-                                                        niter=12, 
-                                                        Nsigma=5, 
-                                                        Inpaint=False, 
-                                                        Bmode=False, 
-                                                        ktr=None, 
-                                                        pass_class=[psWT_gen1, psWT_gen2])
+    # mcalens reconstruction
+    mcalens, k1i5, k2r5, k2i = M.sparse_wiener_filtering(InshearData=D, 
+                                                    PowSpecSignal=p_signal,
+                                                    niter=12, 
+                                                    Nsigma=5, 
+                                                    Inpaint=False, 
+                                                    Bmode=False, 
+                                                    ktr=None, 
+                                                    pass_class=[psWT_gen1, psWT_gen2])
+
+    # downsample
+    true = downsample(true, size=args.resize)
+    pred = downsample(pred, size=args.resize)
+    ks = downsample(ks, size=args.resize)
+    wiener = downsample(wiener, size=args.resize)
+    sparse = downsample(sparse, size=args.resize)
+    mcalens = downsample(mcalens, size=args.resize)
 
     save_cube(true, pred, ks, wiener, sparse, mcalens, save_dir=args.save_dir, save_name=fname)
 
@@ -108,11 +120,14 @@ def get_args():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/kappa_map/result/prediction', type=str)
+    parser.add_argument("--shear-dir", default='/share/lirui/Wenhan/WL/kappa_map/result/noisy_shear', type=str)
     parser.add_argument("--save-dir", default='/share/lirui/Wenhan/WL/kappa_map/result/master_cubes', type=str)
     parser.add_argument("--cpu", default=20, type=int, help='number of cpu cores to use for multiprocessing')
-    parser.add_argument("--n-galaxy", default=50, type=int)
-    parser.add_argument("--have-mcalens", default=False, action='store_true')
-    parser.add_argument("--bare", default=False, action='store_true')
+    parser.add_argument("-g", "--n-galaxy", default=50, type=float)
+    parser.add_argument("--pred-id", default=3, type=int, help='id number of prediction frame, starting from 0')
+    parser.add_argument("--true-id", default=2, type=int, help='id number of true frame, starting from 0')
+    parser.add_argument("--crop", default=512, type=int, help='kappa size to crop (stored shear size)')
+    parser.add_argument("--resize", default=256, type=int, help='kappa size to downsample')
     return parser.parse_args()
 
 
