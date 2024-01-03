@@ -1,0 +1,120 @@
+import torch
+from torch import nn
+from pytorch_msssim import SSIM, MS_SSIM
+
+
+class FreqLoss(nn.Module):
+    def __init__(self, img_size, radius, weight=1, device=None):
+        super().__init__()
+        self.l1 = nn.L1Loss()
+        self.size = img_size
+        self.radius = radius
+        self.mask = self.create_mask().to(device)
+        self.weight = weight
+    
+    def create_mask(self):
+        s = self.size
+        x, y = torch.meshgrid(torch.arange(-s/2, s/2), torch.arange(-s/2, s/2), indexing='ij')
+        d = torch.sqrt((x+0.5)**2 + (y+0.5)**2)
+        mask = d <= self.radius
+        mask = mask.float().unsqueeze(0).unsqueeze(0)
+        return mask
+    
+    def power_spec(self, image):
+        ft = torch.fft.fft2(image)
+        pspec = torch.abs(ft)**2
+        pspec_shifted = torch.fft.fftshift(pspec)
+        return pspec_shifted
+    
+    def forward(self, output, target):
+        ps_output = self.power_spec(output) * self.mask
+        ps_target = self.power_spec(target) * self.mask
+        return self.l1(ps_output, ps_target) * self.weight
+
+
+class FreqLoss1D(nn.Module):
+    def __init__(self, img_size, radius, weight=1e-3, device=None):
+        super().__init__()
+        self.l1 = nn.L1Loss()
+        self.size = img_size
+        self.radius = radius
+        self.masks = self.create_masks().to(device)
+        self.weight = weight
+    
+    def create_masks(self):
+        s = self.size
+        bins = torch.arange(0, self.radius+1.0, 1.0)
+        x, y = torch.meshgrid(torch.arange(-s/2, s/2), torch.arange(-s/2, s/2), indexing='ij')
+        d = torch.sqrt((x+0.5)**2 + (y+0.5)**2)
+        d = d.unsqueeze(0).expand(len(bins)-1, s, s)
+        bins_low = bins[:-1].unsqueeze(1).unsqueeze(2).expand(len(bins)-1, s, s)
+        bins_upp = bins[1:].unsqueeze(1).unsqueeze(2).expand(len(bins)-1, s, s)
+        masks = (d >= bins_low) & (d < bins_upp)
+        return masks.unsqueeze(0).unsqueeze(0)
+    
+    def power_spec(self, image):
+        ft = torch.fft.fft2(image)
+        pspec = torch.abs(ft)**2
+        pspec_shifted = torch.fft.fftshift(pspec)
+        return pspec_shifted
+    
+    def radial_power_spec(self, ps2D):
+        rad_ps = torch.sum(ps2D.unsqueeze(2) * self.masks, dim=(3, 4))
+        # sum across channel dimension
+        rad_ps = torch.sum(rad_ps, dim=1)
+        return rad_ps
+    
+    def forward(self, output, target):
+        ps_output = self.radial_power_spec(ps2D=self.power_spec(output))
+        ps_target = self.radial_power_spec(ps2D=self.power_spec(target))
+        return self.l1(ps_output, ps_target) * self.weight
+
+
+class MSSSIMLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.ms_ssim = MS_SSIM(win_size=11, win_sigma=1.5, data_range=1.0, channel=1)
+    
+    def forward(self, output, target):
+        denorm_target = (target - torch.min(target)) / (torch.max(target) - torch.min(target))
+        denorm_output = (output - torch.min(output)) / (torch.max(output) - torch.min(output))
+        return 1.0 - self.ms_ssim(denorm_output, denorm_target)
+
+
+class L1Mod(nn.Module):
+    def __init__(self, weight=1e3):
+        super().__init__()
+        self.l1 = nn.L1Loss()
+        self.weight = weight
+    
+    def forward(self, output, target):
+        return self.l1(output, target) * self.weight
+
+
+class HuberMod(nn.Module):
+    def __init__(self, delta, weight=1e3):
+        super().__init__()
+        self.huber = nn.HuberLoss(delta=delta)
+        self.weight = weight
+    
+    def forward(self, output, target):
+        return self.huber(output, target) * self.weight
+
+
+def loss_fn_selector(args, device):
+    if args.spac_loss == 'huber':
+        spac_fn = HuberMod(delta=args.huber_delta, weight=1e3)
+    elif args.spac_loss == 'l1':
+        spac_fn = L1Mod(weight=1e3)
+    elif args.spac_loss == 'ms-ssim':
+        spac_fn = MSSSIMLoss()
+    
+    if args.freq_loss == 'freq':
+        freq_fn = FreqLoss(img_size=args.resize, radius=args.resize/32, weight=1, device=device)
+    elif args.freq_loss == 'freq1d':
+        freq_fn = FreqLoss1D(img_size=args.resize, radius=args.resize/32, weight=1e-3, device=device)
+
+    if args.freq_loss == None:
+        return spac_fn
+    else:
+        return freq_fn, spac_fn
