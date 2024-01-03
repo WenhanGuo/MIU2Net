@@ -167,11 +167,11 @@ class Wiener(object):
     """
     def __init__(self, args):
         self.mode = args.wiener
-        self.p_signal = fits.open('./signal_power_spectrum.fits')[0].data
+        self.p_signal = fits.open('./pspec/signal_power_spectrum.fits')[0].data
         if args.n_galaxy == 50:
-            self.p_noise = fits.open('./noise_power_spectrum_g50.fits')[0].data
+            self.p_noise = fits.open('./pspec/noise_power_spectrum_g50.fits')[0].data
         elif args.n_galaxy == 20:
-            self.p_noise = fits.open('./noise_power_spectrum_g20.fits')[0].data
+            self.p_noise = fits.open('./pspec/noise_power_spectrum_g20.fits')[0].data
         # Create the cosmostat mass mapping structure and initialize it
         self.M = massmap2d(name='mass_wiener')
         self.psWT_gen1 = pysparse.MRStarlet(bord=1, gen2=False, nb_procs=1, verbose=0)
@@ -257,7 +257,7 @@ class MCALens(object):
     """
     def __init__(self, args):
         self.mode = args.mcalens
-        self.p_signal = fits.open('./signal_power_spectrum.fits')[0].data
+        self.p_signal = fits.open('./pspec/signal_power_spectrum.fits')[0].data
         self.M = massmap2d(name='mass_mcalens')
         self.psWT_gen1 = pysparse.MRStarlet(bord=1, gen2=False, nb_procs=1, verbose=0)
         self.psWT_gen2 = pysparse.MRStarlet(bord=1, gen2=True, nb_procs=1, verbose=0)

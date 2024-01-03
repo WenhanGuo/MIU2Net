@@ -65,17 +65,17 @@ def make_cube(args, fname):
     psWT_gen1 = pysparse.MRStarlet(bord=1, gen2=False, nb_procs=1, verbose=0)
     psWT_gen2 = pysparse.MRStarlet(bord=1, gen2=True, nb_procs=1, verbose=0)
     M.init_massmap(nx=args.crop, ny=args.crop, pass_class=[psWT_gen1, psWT_gen2])
-    p_signal = fits.open('./signal_power_spectrum.fits')[0].data
+    p_signal = fits.open('./pspec/signal_power_spectrum.fits')[0].data
     if args.n_galaxy == 1059:
-        p_noise = fits.open('./noise_power_spectrum_g1059.fits')[0].data
+        p_noise = fits.open('./pspec/noise_power_spectrum_g1059.fits')[0].data
     if args.n_galaxy == 50:
-        p_noise = fits.open('./noise_power_spectrum_g50.fits')[0].data
+        p_noise = fits.open('./pspec/noise_power_spectrum_g50.fits')[0].data
     elif args.n_galaxy == 30:
-        p_noise = fits.open('./noise_power_spectrum_g30.fits')[0].data
+        p_noise = fits.open('./pspec/noise_power_spectrum_g30.fits')[0].data
     elif args.n_galaxy == 20:
-        p_noise = fits.open('./noise_power_spectrum_g20.fits')[0].data
+        p_noise = fits.open('./pspec/noise_power_spectrum_g20.fits')[0].data
     elif args.n_galaxy == 5:
-        p_noise = fits.open('./noise_power_spectrum_g5.fits')[0].data
+        p_noise = fits.open('./pspec/noise_power_spectrum_g5.fits')[0].data
 
     # ks reconstruction
     ks =  M.g2k(D.g1, D.g2, pass_class=[psWT_gen1, psWT_gen2])
