@@ -1,17 +1,13 @@
-#! -*- coding: utf-8 -*-
-import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1,2'
-
 from model import UNet
 import torch
 from torch import nn
 import transforms as T
-from torchvision.transforms import GaussianBlur
 from torch.utils.data import DataLoader
 from my_dataset import ImageDataset
+from loss_functions import loss_fn_selector
 from torch.utils.tensorboard import SummaryWriter
-from kornia.geometry.transform import resize
 
+import os
 import shutil
 import math
 from prettytable import PrettyTable
@@ -30,6 +26,7 @@ def count_parameters(model):
     print(f"Total Trainable Params: {total_params}")
     return total_params
 
+# UNet total trainable params = 31031169
 
 def create_lr_scheduler(optimizer,
                         num_step: int,
@@ -63,34 +60,26 @@ def create_lr_scheduler(optimizer,
 def main(args):
 
     # prepare train and validation datasets; augment data with flip & rotations; add noise
-    if args.gaus_blur == True:
-        target_gb = GaussianBlur(kernel_size=5, sigma=2.0)
-    else:
-        target_gb = None
     train_data = ImageDataset(catalog=os.path.join(args.dir, 'train.ecsv'), 
                               args=args, 
                               transforms=T.Compose([
                                   T.KS_rec(args), 
-                                  T.RandomHorizontalFlip(prob=0.5), 
-                                  T.RandomVerticalFlip(prob=0.5), 
-                                  T.DiscreteRotation(angles=[0, 90, 180, 270]), 
-                                  T.RandomCrop(size=512), 
+                                #   T.RandomHorizontalFlip(prob=0.5), 
+                                #   T.RandomVerticalFlip(prob=0.5), 
+                                #   T.DiscreteRotation(angles=[0, 90, 180, 270]), 
+                                  T.RandomCrop(size=args.crop), 
                                   T.Wiener(args), 
                                   T.sparse(args), 
-                                  T.MCALens(args)
-                                  ]), 
-                              gaus_blur=target_gb
+                                  T.MCALens(args)])
                               )
     val_data = ImageDataset(catalog=os.path.join(args.dir, 'validation.ecsv'), 
                             args=args, 
                             transforms=T.Compose([
                                 T.KS_rec(args), 
-                                T.RandomCrop(size=512), 
+                                T.RandomCrop(size=args.crop), 
                                 T.Wiener(args), 
                                 T.sparse(args), 
-                                T.MCALens(args)
-                                ]), 
-                            gaus_blur=target_gb
+                                T.MCALens(args)])
                             )
     # prepare train and validation dataloaders
     loader_args = dict(batch_size=args.batch_size, num_workers=args.cpu, pin_memory=True)
@@ -110,19 +99,35 @@ def main(args):
     elif args.ks == 'only' or args.wiener == 'only':
         in_channels = 1
     print('in_channels =', in_channels)
-    model = UNet()
+    model = UNet(n_channels=in_channels)
+    
+    if args.load:
+        print(f'initializing model using {args.load}.pth')
+        state_dict = torch.load('../models/'+args.load+'.pth', map_location=device)
+        remove_prefix = 'module.'
+        state_dict = {k[len(remove_prefix):] if k.startswith(remove_prefix) else k: v for k, v in state_dict.items()}
+        model.load_state_dict(state_dict)
 
     if args.param_count == True:
         count_parameters(model)
     # data parallel training on multiple GPUs (restrained by cuda visible devices)
-    if torch.cuda.device_count() > 1:
-        model = nn.DataParallel(model)
-    model.to(device, memory_format=torch.channels_last)
+    if len(args.gpu_ids) > 1:
+        model.to(args.gpu_ids[0])
+        model = nn.DataParallel(model, args.gpu_ids)  # multi-GPUs
+    else:
+        model.to(device, memory_format=torch.channels_last)
     torch.cuda.empty_cache()
 
-    # setting loss function, optimizer, and scheduler
-    loss_fn = nn.HuberLoss(delta=args.huber_delta)
-    loss_fn = loss_fn.to(device)
+    # setting loss function
+    if args.freq_loss == None:
+        dual_domain = False
+        loss_fn = loss_fn_selector(args, device)
+        loss_fn = loss_fn.to(device)
+    elif args.spac_loss and args.freq_loss:
+        print('Setting loss function in both spatial and frequency domain.')
+        dual_domain = True
+        loss_fn, spac_fn = loss_fn_selector(args, device)
+        loss_fn, spac_fn = loss_fn.to(device), spac_fn.to(device)
 
     # setting optimizer & lr scheduler
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=args.lr, 
@@ -136,6 +141,8 @@ def main(args):
     writer = SummaryWriter('../tlogs_unet')
     # delete existing tensorboard logs
     shutil.rmtree('../tlogs_unet')
+    os.mkdir('../tlogs_unet')
+
     # begin training
     total_train_step = 0
     best_loss = False
@@ -151,9 +158,12 @@ def main(args):
             
             with torch.cuda.amp.autocast(enabled=scaler is not None):
                 output = model(image)
-                resize_output = resize(output, size=(args.kappa_size, args.kappa_size))
-                resize_target = resize(target, size=(args.kappa_size, args.kappa_size))
-                train_step_loss = loss_fn(resize_output, resize_target)
+                if dual_domain:
+                    spac = spac_fn(output, target)
+                    freq = loss_fn(output, target)
+                    train_step_loss = spac + freq
+                else:
+                    train_step_loss = loss_fn(output, target)
 
             # optimizer step
             optimizer.zero_grad()
@@ -164,37 +174,55 @@ def main(args):
             else:
                 train_step_loss.backward()
                 optimizer.step()
-            lr_scheduler.step()
-            curr_lr = optimizer.param_groups[0]["lr"]
 
             total_train_step += 1
             # print 3 train losses per epoch
             if total_train_step % (len(train_loader) // 3) == 0:
-                print(f"train step: {total_train_step}, \
-                      current loss: {train_step_loss.item():.3}")
-        
+                if dual_domain:
+                    print(f"train step: {total_train_step}, current loss: {train_step_loss.item():.3}, \
+                      spac: {spac.item():.3}, freq: {freq.item():.3}")
+                else:
+                    print(f"train step: {total_train_step}, \
+                          current loss: {train_step_loss.item():.3}")
+
+            lr_scheduler.step()
+            curr_lr = optimizer.param_groups[0]["lr"]
+
         # validation steps
         model.eval()
-        val_loss = 0.0
+        val_loss, val_spac, val_freq = 0.0, 0.0, 0.0
         with torch.no_grad():
             for image, target in val_loader:
                 image = image.to(device, memory_format=torch.channels_last)
                 target = target.to(device, memory_format=torch.channels_last)
                 output = model(image)
-                val_loss += loss_fn(output, target).item() / len(val_loader)
+                if dual_domain:
+                    val_spac += spac_fn(output, target).item() / len(val_loader)
+                    val_freq += loss_fn(output, target).item() / len(val_loader)
+                    val_loss = val_spac + val_freq
+                else:
+                    val_loss += loss_fn(output, target).item() / len(val_loader)
 
         # printing epoch stats & writing to tensorboard
         print(f"epoch training loss = {train_step_loss:.4}", f"LR = {curr_lr:.3}")
-        print(f"avg validation loss = {val_loss:.4}")
-        writer.add_scalar("train_loss", train_step_loss.item(), global_step=i+1)
-        writer.add_scalar("val_loss", val_loss, global_step=i+1)
+        writer.add_scalars("loss", {'train':train_step_loss.item(), 
+                                    'validation':val_loss}, global_step=i+1)
         writer.add_scalar("lr", curr_lr, global_step=i+1)
+        if dual_domain:
+            print(f"avg validation loss = {val_loss:.4}, spac = {val_spac:.4}, freq = {val_freq:.4}")
+            writer.add_scalars("train", {'spac':spac.item(), 
+                                         'freq':freq.item()}, global_step=i+1)
+            writer.add_scalars("val", {'val_spac':val_spac, 
+                                       'val_freq':val_freq}, global_step=i+1)
+        else:
+            print(f"avg validation loss = {val_loss:.4}")
 
         # save model for every best loss epoch
         if not best_loss:
             best_loss = val_loss
         elif val_loss < best_loss:
-            torch.save(model, f'../models/kappa2d_e{i+1}.pth')
+            state_dict = model.state_dict()
+            torch.save(state_dict, f'../models/unet1_e{i+1}.pth')
             print(f"saved best loss model at epoch = {i+1}!")
             best_loss = val_loss
             best_epoch = i+1
@@ -207,13 +235,16 @@ def get_args():
     import argparse
     parser = argparse.ArgumentParser(description='Train U2Net')
     parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/data_1024_2d', type=str, help='data directory')
+    parser.add_argument("--gpu_ids", default='1', type=str, help='gpu id; multiple gpu use comma; e.g. 0,1,2')
     parser.add_argument("--cpu", default=32, type=int, help='number of cpu cores to use')
     parser.add_argument("-g", "--n-galaxy", default=50, type=float, help='number of galaxies per arcmin (to determine noise level)')
-    parser.add_argument("-e", "--epochs", default=256, type=int, help='number of total epochs to train')
+    parser.add_argument("-e", "--epochs", default=512, type=int, help='number of total epochs to train')
     parser.add_argument("-b", "--batch-size", default=32, type=int, help='batch size')
     parser.add_argument("--lr", default=1e-4, type=float, help='initial learning rate')
     parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
-    parser.add_argument("--kappa-size", default=512, type=int, help='kappa size to downsample. 512x512 is original kappa')
+    parser.add_argument("--crop", default=512, type=int, help='crop 1024x1024 kappa to this size')
+    parser.add_argument("--resize", default=256, type=int, help='downsample kappa to this size')
+    parser.add_argument("--load", default=False, type=str, help='whether to load a pre-trained .pth model')
     parser.add_argument("--mixed-precision", default=False, action='store_true', help='Use torch.cuda.amp for mixed precision training')
 
     parser.add_argument("--ks", default='off', type=str, choices=['off', 'add', 'only'], help='KS93 deconvolution (no KS, KS as an extra channel, no shear and KS only)')
@@ -221,13 +252,14 @@ def get_args():
     parser.add_argument("--sparse", default='off', type=str, choices=['off', 'add', 'only'], help='sparse reconstruction')
     parser.add_argument("--mcalens", default='off', type=str, choices=['off', 'add', 'only'], help='MCALens reconstruction')
 
-    parser.add_argument("--loss-fn", default='Huber', type=str, choices=['l1', 'Huber', 'SSIM', 'MS-SSIM', 'l1-SSIM', 'l1-MS-SSIM', 'FFL', 'HuberFFL'], help='loss function')
+    parser.add_argument("--spac-loss", default='huber', type=str, choices=['huber', 'l1', 'ssim', 'ms-ssim'], help='spatial domain loss function')
+    parser.add_argument("--freq-loss", default=None, type=str, choices=['freq', 'freq1d'], help='frequency domain loss function')
     parser.add_argument("--wiener-res", default=False, action='store_true', help='if the target is true - wiener')
     parser.add_argument("--assemble-mode", default='1x1conv', type=str, choices=['1x1conv', 'laplacian_pyr'], help='experimental feature')
     parser.add_argument("--huber-delta", default=50.0, type=float, help='delta value for Huberloss')
     parser.add_argument("--ffl-weight", default=2.0, type=float, help='weight for Focal Frequency Loss')
     parser.add_argument("--ffl-alpha", default=1.0, type=float, help='alpha for Focal Frequency Loss')
-    parser.add_argument("--weight-decay", default=1e-2, type=float, help='weight decay for AdamW optimizer')
+    parser.add_argument("--weight-decay", default=0, type=float, help='weight decay for AdamW optimizer')
     parser.add_argument("--param-count", default=False, action='store_true', help='show model parameter count summary')
 
     parser.add_argument("--save-noisy-shear", default=False, action='store_true', help='write shear with added gaussian noise to disk')
@@ -245,7 +277,14 @@ if __name__ == '__main__':
     print(table)
 
     # define training device (cpu/gpu)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print('device =', device)
+    str_ids = args.gpu_ids.split(',')
+    args.gpu_ids = []
+    for str_id in str_ids:
+        id = int(str_id)
+        if id >= 0:
+            args.gpu_ids.append(id)
+    if len(args.gpu_ids) > 0:
+        torch.cuda.set_device(args.gpu_ids[0])
+    device = torch.device(f'cuda:{args.gpu_ids[0]}' if torch.cuda.is_available() else 'cpu')
 
     main(args)
