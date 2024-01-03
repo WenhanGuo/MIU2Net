@@ -1,21 +1,15 @@
-#! -*- coding: utf-8 -*-
-import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
-
 from model_u2net import u2net_full
 import torch
 from torch import nn
 import transforms as T
-from torchvision.transforms import GaussianBlur
 from torch.utils.data import DataLoader
 from my_dataset import ImageDataset
+from loss_functions import loss_fn_selector
 from torch.utils.tensorboard import SummaryWriter
-from kornia.geometry.transform import resize
-from kornia.filters.gaussian import gaussian_blur2d
 
+import os
 import shutil
 import math
-import numpy as np
 from prettytable import PrettyTable
 import datetime
 
@@ -32,6 +26,7 @@ def count_parameters(model):
     print(f"Total Trainable Params: {total_params}")
     return total_params
 
+# U2Net total trainable params = 43994893
 
 def create_lr_scheduler(optimizer,
                         num_step: int,
@@ -62,91 +57,36 @@ def create_lr_scheduler(optimizer,
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=f)
 
 
-class HuberLogisticLoss(nn.Module):
-    def __init__(self, delta):
-        super().__init__()
-        self.huber = nn.HuberLoss(delta=delta)
-    
-    def gen_logistic(self, x, B=25, K=1, nu=0.1, Q=5, A=0, C=1):
-        Y = A + (K - A) / ((C + Q * torch.e**(-B*abs(x)))**(1/nu))
-        return torch.mean(Y)
-        
-    def forward(self, output, target):
-        return self.huber(output, target) + self.gen_logistic(output - target)
-
-
-class L1LogisticLoss(nn.Module):
-    def __init__(self):
-        super().__init__()
-    
-    def l1_gen_logistic(self, x, B=25, K=100, nu=0.1, Q=5, A=0, C=1):
-        l1 = abs(x) - 0.3
-        l1[abs(x) < 0.3] = 0.
-        Y = A + (K - A) / ((C + Q * torch.e**(-B*abs(x)))**(1/nu))
-        return torch.mean(Y + l1 * 20)
-    
-    def forward(self, output, target):
-        return self.l1_gen_logistic(output - target)
-
-
-def build_laplacian_pyramid(tensor, max_level=5):
-    pyramid = []
-    current_layer = tensor
-    for _ in range(max_level):
-        # Apply Gaussian filter and downsample to get gaussian pyramid
-        gaussian_layer = gaussian_blur2d(current_layer, kernel_size=(5, 5), sigma=(2., 2.), border_type='reflect')
-        downsampled = resize(gaussian_layer, size=(current_layer.shape[-2]//2, current_layer.shape[-1]//2))
-
-        # Upsample and subtract to get the Laplacian
-        upsampled = resize(downsampled, size=current_layer.shape[-2:])
-        laplacian = current_layer - upsampled
-        pyramid.append(laplacian)
-
-        # Update the current layer
-        current_layer = downsampled
-
-    pyramid.append(current_layer)
-    return pyramid
-
-
 def main(args):
 
     # prepare train and validation datasets; augment data with flip & rotations; add noise
-    if args.gaus_blur == True:
-        target_gb = GaussianBlur(kernel_size=5, sigma=2.0)
-    else:
-        target_gb = None
     train_data = ImageDataset(catalog=os.path.join(args.dir, 'train.ecsv'), 
-                              n_galaxy=args.n_galaxy, 
+                              args=args, 
                               transforms=T.Compose([
                                   T.KS_rec(args), 
-                                  T.RandomHorizontalFlip(prob=0.5), 
-                                  T.RandomVerticalFlip(prob=0.5), 
-                                  T.ContinuousRotation(degrees=180), 
-                                  T.RandomCrop(size=512), 
+                                #   T.RandomHorizontalFlip(prob=0.5), 
+                                #   T.RandomVerticalFlip(prob=0.5), 
+                                #   T.DiscreteRotation(angles=[0, 90, 180, 270]), 
+                                  T.RandomCrop(size=args.crop), 
                                   T.Wiener(args), 
                                   T.sparse(args), 
-                                  T.MCALens(args)
-                                  ]), 
-                              gaus_blur=target_gb
+                                  T.MCALens(args)])
                               )
     val_data = ImageDataset(catalog=os.path.join(args.dir, 'validation.ecsv'), 
-                            n_galaxy=args.n_galaxy, 
+                            args=args, 
                             transforms=T.Compose([
                                 T.KS_rec(args), 
-                                T.RandomCrop(size=512), 
+                                T.RandomCrop(size=args.crop), 
                                 T.Wiener(args), 
                                 T.sparse(args), 
-                                T.MCALens(args)
-                                ]), 
-                            gaus_blur=target_gb
+                                T.MCALens(args)])
                             )
     # prepare train and validation dataloaders
     loader_args = dict(batch_size=args.batch_size, num_workers=args.cpu, pin_memory=True)
     train_loader = DataLoader(train_data, shuffle=True, drop_last=True, **loader_args)
     val_loader = DataLoader(val_data, shuffle=True, drop_last=True, **loader_args)
 
-    # initialize UNet model
+    # initialize U2Net model
     in_channels = 2
     if args.ks == 'add':
         in_channels += 1
@@ -156,38 +96,52 @@ def main(args):
         in_channels += 1
     if args.mcalens == 'add':
         in_channels += 1
+    elif args.ks == 'only' or args.wiener == 'only':
+        in_channels = 1
     print('in_channels =', in_channels)
     model = u2net_full(in_ch=in_channels, mode=args.assemble_mode)
+    
+    if args.load:
+        print(f'initializing model using {args.load}.pth')
+        state_dict = torch.load('../models/'+args.load+'.pth', map_location=device)
+        remove_prefix = 'module.'
+        state_dict = {k[len(remove_prefix):] if k.startswith(remove_prefix) else k: v for k, v in state_dict.items()}
+        model.load_state_dict(state_dict)
 
     if args.param_count == True:
         count_parameters(model)
     # data parallel training on multiple GPUs (restrained by cuda visible devices)
-    if torch.cuda.device_count() > 1:
-        model = nn.DataParallel(model)
-    model.to(device, memory_format=torch.channels_last)
+    if len(args.gpu_ids) > 1:
+        model.to(args.gpu_ids[0])
+        model = nn.DataParallel(model, args.gpu_ids)  # multi-GPUs
+    else:
+        model.to(device, memory_format=torch.channels_last)
     torch.cuda.empty_cache()
 
     # setting loss function
-    if args.loss_fn == 'Huber':
-        loss_fn = nn.HuberLoss(delta=args.huber_delta)
-    elif args.loss_fn == 'HuberLogistic':
-        loss_fn = HuberLogisticLoss(delta=args.huber_delta)
-    elif args.loss_fn == 'L1Logistic':
-        loss_fn = L1LogisticLoss()
-    loss_fn = loss_fn.to(device)
+    if args.freq_loss == None:
+        dual_domain = False
+        loss_fn = loss_fn_selector(args, device)
+        loss_fn = loss_fn.to(device)
+    elif args.spac_loss and args.freq_loss:
+        print('Setting loss function in both spatial and frequency domain.')
+        dual_domain = True
+        loss_fn, spac_fn = loss_fn_selector(args, device)
+        loss_fn, spac_fn = loss_fn.to(device), spac_fn.to(device)
 
     # setting optimizer & lr scheduler
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=args.lr, 
                                   weight_decay=args.weight_decay)
     lr_scheduler = create_lr_scheduler(optimizer, len(train_loader), args.epochs,
                                        warmup=True, warmup_epochs=3)
-    scaler = torch.cuda.amp.GradScaler()   # Use torch.cuda.amp for mixed precision training
+    # Use torch.cuda.amp for mixed precision training
+    scaler = torch.cuda.amp.GradScaler() if args.mixed_precision == True else None
 
     # use tensorboard to visualize computation
-    writer = SummaryWriter('../tlogs_kappa2d')
+    writer = SummaryWriter('../tlogs_k2d')
     # delete existing tensorboard logs
-    shutil.rmtree('../tlogs_kappa2d')
-    os.mkdir('../tlogs_kappa2d')
+    shutil.rmtree('../tlogs_k2d')
+    os.mkdir('../tlogs_k2d')
 
     # begin training
     total_train_step = 0
@@ -204,16 +158,13 @@ def main(args):
             
             with torch.cuda.amp.autocast(enabled=scaler is not None):
                 outputs = model(image)
-                # native mode: based on true target for every side output
-                if args.assemble_mode == '1x1conv':
-                    losses = [loss_fn(outputs[j], target) for j in range(len(outputs))]
-                elif args.assemble_mode == 'laplacian_pyr':
-                    target_pyr = build_laplacian_pyramid(target, max_level=5)
-                    losses = [loss_fn(outputs[j+1], target_pyr[j]) for j in range(len(target_pyr))]
-                    loss_targ = loss_fn(outputs[0], target)
-                    losses.insert(0, loss_targ)
-                
-                train_step_loss = sum(losses)
+                if dual_domain:
+                    spac = [spac_fn(output, target) for output in outputs]
+                    freq = [loss_fn(output, target) for output in outputs]
+                    train_step_loss = sum(spac) + sum(freq)
+                else:
+                    losses = [loss_fn(output, target) for output in outputs]
+                    train_step_loss = sum(losses)
 
             # optimizer step
             optimizer.zero_grad()
@@ -224,61 +175,93 @@ def main(args):
             else:
                 train_step_loss.backward()
                 optimizer.step()
-            lr_scheduler.step()
-            curr_lr = optimizer.param_groups[0]["lr"]
 
             total_train_step += 1
             # print 3 train losses per epoch
             if total_train_step % (len(train_loader) // 3) == 0:
-                print(f"train step: {total_train_step}, \
-                      total loss: {train_step_loss:.3}, \
-                      targ loss: {losses[0]:.3}, \n \
-                      side loss: {losses[1]:.3},{losses[2]:.3},{losses[3]:.3},{losses[4]:.3},{losses[5]:.3},{losses[6]:.3}")
-        
+                if dual_domain:
+                    print(f"train step: {total_train_step}, current loss: {train_step_loss.item():.3}, \
+                          spac: {sum(spac).item():.3}, freq: {sum(freq).item():.3}, \n \
+                          targ spac: {spac[0]:.3}, \
+                          side spac: {spac[1]:.3},{spac[2]:.3},{spac[3]:.3},{spac[4]:.3},{spac[5]:.3},{spac[6]:.3}, \n \
+                          targ freq: {freq[0]:.3}, \
+                          side freq: {freq[1]:.3},{freq[2]:.3},{freq[3]:.3},{freq[4]:.3},{freq[5]:.3},{freq[6]:.3}")
+                else:
+                    print(f"train step: {total_train_step}, \
+                          current loss: {train_step_loss.item():.3}, \n \
+                          targ loss: {losses[0]:.3}, \
+                          side loss: {losses[1]:.3},{losses[2]:.3},{losses[3]:.3},{losses[4]:.3},{losses[5]:.3},{losses[6]:.3}")
+
+            lr_scheduler.step()
+            curr_lr = optimizer.param_groups[0]["lr"]
+
         # validation steps
         model.eval()
-        val_loss = 0.0
+        val_loss, val_spac, val_freq = 0.0, 0.0, 0.0
         with torch.no_grad():
             for image, target in val_loader:
                 image = image.to(device, memory_format=torch.channels_last)
                 target = target.to(device, memory_format=torch.channels_last)
                 outputs = model(image)
-                val_loss += loss_fn(outputs[0], target).item() / len(val_loader)
+                output = outputs[0]
+                if dual_domain:
+                    val_spac += spac_fn(output, target).item() / len(val_loader)
+                    val_freq += loss_fn(output, target).item() / len(val_loader)
+                    val_loss = val_spac + val_freq
+                else:
+                    val_loss += loss_fn(output, target).item() / len(val_loader)
 
         # printing final 1x1 convolution layer (learned weights for each side outputs)
         for name, param in model.named_parameters():
             # if single gpu, name == 'out_conv.weight'; if multiple gpus, name == 'module.out_conv.weight'
             if param.requires_grad and 'out_conv.weight' in name:
-                last_w = np.array(torch.flatten(param.data.cpu()))
+                last_w = torch.flatten(param.data.cpu()).numpy()
             elif param.requires_grad and 'out_conv.bias' in name:
                 last_b = param.data.item()
                 print(f'1x1 conv weights = {last_w.round(3)}, bias = {last_b:.3}')
 
         # printing epoch stats & writing to tensorboard
         print(f"epoch training loss = {train_step_loss:.4}", f"LR = {curr_lr:.3}")
-        print(f"avg validation loss = {val_loss:.4}")
-        writer.add_scalar("train_loss", train_step_loss.item(), global_step=i+1)
-        writer.add_scalar("targ_loss", losses[0].item(), global_step=i+1)
-        writer.add_scalars("side_losses", {'side1':losses[1].item(), 
-                                           'side2':losses[2].item(), 
-                                           'side3':losses[3].item(), 
-                                           'side4':losses[4].item(), 
-                                           'side5':losses[5].item(), 
-                                           'side6':losses[6].item()}, global_step=i+1)
+        writer.add_scalar("lr", curr_lr, global_step=i+1)
         writer.add_scalars("conv_weights", {'side1':last_w[0], 
                                             'side2':last_w[1],
                                             'side3':last_w[2],
                                             'side4':last_w[3],
                                             'side5':last_w[4],
                                             'side6':last_w[5]}, global_step=i+1)
-        writer.add_scalar("val_loss", val_loss, global_step=i+1)
-        writer.add_scalar("lr", curr_lr, global_step=i+1)
+        if dual_domain:
+            print(f"avg validation loss = {val_loss:.4}, spac = {val_spac:.4}, freq = {val_freq:.4}")
+            writer.add_scalars("train_loss", {'total':train_step_loss.item(), 
+                                              'spac':sum(spac).item(), 
+                                              'freq':sum(freq).item()}, global_step=i+1)
+            writer.add_scalars("targ_spac", {'train':spac[0].item(), 
+                                             'validation':val_spac}, global_step=i+1)
+            writer.add_scalars("targ_freq", {'train':freq[0].item(), 
+                                             'validation':val_freq}, global_step=i+1)
+            writer.add_scalars("side_freqs", {'side1':freq[1].item(), 
+                                              'side2':freq[2].item(), 
+                                              'side3':freq[3].item(), 
+                                              'side4':freq[4].item(), 
+                                              'side5':freq[5].item(), 
+                                              'side6':freq[6].item()}, global_step=i+1)
+        else:
+            print(f"avg validation loss = {val_loss:.4}")
+            writer.add_scalar("train_loss", train_step_loss.item(), global_step=i+1)
+            writer.add_scalars("targ_loss", {'train':losses[0].item(), 
+                                             'validation':val_loss}, global_step=i+1)
+            writer.add_scalars("side_losses", {'side1':losses[1].item(), 
+                                               'side2':losses[2].item(), 
+                                               'side3':losses[3].item(), 
+                                               'side4':losses[4].item(), 
+                                               'side5':losses[5].item(), 
+                                               'side6':losses[6].item()}, global_step=i+1)
 
         # save model for every best loss epoch
         if not best_loss:
             best_loss = val_loss
         elif val_loss < best_loss:
-            torch.save(model, f'../models/kappa2d_e{i+1}.pth')
+            state_dict = model.state_dict()
+            torch.save(state_dict, f'../models/k2d_e{i+1}.pth')
             print(f"saved best loss model at epoch = {i+1}!")
             best_loss = val_loss
             best_epoch = i+1
@@ -291,22 +274,36 @@ def get_args():
     import argparse
     parser = argparse.ArgumentParser(description='Train U2Net')
     parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/data_1024_2d', type=str, help='data directory')
+    parser.add_argument("--gpu_ids", default='6', type=str, help='gpu id; multiple gpu use comma; e.g. 0,1,2')
     parser.add_argument("--cpu", default=32, type=int, help='number of cpu cores to use')
     parser.add_argument("-g", "--n-galaxy", default=50, type=float, help='number of galaxies per arcmin (to determine noise level)')
-    parser.add_argument("-e", "--epochs", default=256, type=int, help='number of total epochs to train')
+    parser.add_argument("-e", "--epochs", default=512, type=int, help='number of total epochs to train')
     parser.add_argument("-b", "--batch-size", default=32, type=int, help='batch size')
     parser.add_argument("--lr", default=1e-4, type=float, help='initial learning rate')
     parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
+    parser.add_argument("--crop", default=512, type=int, help='crop 1024x1024 kappa to this size')
+    parser.add_argument("--resize", default=256, type=int, help='downsample kappa to this size')
+    parser.add_argument("--load", default=False, type=str, help='whether to load a pre-trained .pth model')
+    parser.add_argument("--mixed-precision", default=False, action='store_true', help='Use torch.cuda.amp for mixed precision training')
+
     parser.add_argument("--ks", default='off', type=str, choices=['off', 'add', 'only'], help='KS93 deconvolution (no KS, KS as an extra channel, no shear and KS only)')
     parser.add_argument("--wiener", default='off', type=str, choices=['off', 'add', 'only'], help='Wiener reconstruction')
     parser.add_argument("--sparse", default='off', type=str, choices=['off', 'add', 'only'], help='sparse reconstruction')
     parser.add_argument("--mcalens", default='off', type=str, choices=['off', 'add', 'only'], help='MCALens reconstruction')
-    parser.add_argument("--loss-fn", default='Huber', type=str, choices=['HuberLogistic', 'L1Logistic', 'Huber'], help='loss function')
+
+    parser.add_argument("--spac-loss", default='huber', type=str, choices=['huber', 'l1', 'ssim', 'ms-ssim'], help='spatial domain loss function')
+    parser.add_argument("--freq-loss", default=None, type=str, choices=['freq', 'freq1d'], help='frequency domain loss function')
+    parser.add_argument("--wiener-res", default=False, action='store_true', help='if the target is true - wiener')
     parser.add_argument("--assemble-mode", default='1x1conv', type=str, choices=['1x1conv', 'laplacian_pyr'], help='experimental feature')
-    parser.add_argument("--huber-delta", default=50, type=float, help='delta value for Huberloss')
-    parser.add_argument("--weight-decay", default=1e-2, type=float, help='weight decay for AdamW optimizer')
+    parser.add_argument("--huber-delta", default=50.0, type=float, help='delta value for Huberloss')
+    parser.add_argument("--ffl-weight", default=2.0, type=float, help='weight for Focal Frequency Loss')
+    parser.add_argument("--ffl-alpha", default=1.0, type=float, help='alpha for Focal Frequency Loss')
+    parser.add_argument("--weight-decay", default=0, type=float, help='weight decay for AdamW optimizer')
     parser.add_argument("--param-count", default=False, action='store_true', help='show model parameter count summary')
-    
+
+    parser.add_argument("--save-noisy-shear", default=False, action='store_true', help='write shear with added gaussian noise to disk')
+    parser.add_argument("--save-noisy-shear-dir", default='/share/lirui/Wenhan/WL/kappa_map/result/noisy_shear', type=str)
+
     return parser.parse_args()
 
 
@@ -319,7 +316,14 @@ if __name__ == '__main__':
     print(table)
 
     # define training device (cpu/gpu)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print('device =', device)
+    str_ids = args.gpu_ids.split(',')
+    args.gpu_ids = []
+    for str_id in str_ids:
+        id = int(str_id)
+        if id >= 0:
+            args.gpu_ids.append(id)
+    if len(args.gpu_ids) > 0:
+        torch.cuda.set_device(args.gpu_ids[0])
+    device = torch.device(f'cuda:{args.gpu_ids[0]}' if torch.cuda.is_available() else 'cpu')
 
     main(args)
