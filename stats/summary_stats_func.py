@@ -1,7 +1,8 @@
 import numpy as np
 from scipy.stats import binned_statistic
 from skimage.feature import peak_local_max
-from sklearn.metrics import mean_squared_error as MSE
+from sklearn.metrics import mean_squared_error as mse
+from skimage.metrics import structural_similarity as ssim
 from astropy.io import fits
 import astropy.units as u
 from astropy.convolution import Gaussian2DKernel, convolve
@@ -144,17 +145,17 @@ def radial_pspec(ps2D, binsize=1.0, logspacing=False):
     return bin_cents, ps1D
 
 # calculate 1D power spectrum from image
-def P(img, logspacing=False):
+def P(img, binsize=1.0, logspacing=False):
     ps2D = pspec(img=img)
-    freqs, ps1D = radial_pspec(ps2D=ps2D, binsize=1.0, logspacing=logspacing)
+    freqs, ps1D = radial_pspec(ps2D=ps2D, binsize=binsize, logspacing=logspacing)
     freqs = freqs / u.pix
     return freqs, ps1D
 
 # average 1D power spectrum over many images
-def avg_P(cube, logspacing=False):
+def avg_P(cube, binsize=1.0, logspacing=False):
     ps_cube = []
     for idx in range(len(cube)):
-        freqs, ps = P(cube[idx], logspacing=logspacing)
+        freqs, ps = P(cube[idx], binsize=binsize, logspacing=logspacing)
         ps_cube.append(ps)
         avg_ps = np.mean(ps_cube, axis=0)
     return freqs, avg_ps
@@ -181,8 +182,8 @@ def rel_mse(y_true, y_pred, y_standard, thresholds, mode, binsize=0.05):
             mask = (y_true > t) & (y_true < t + binsize)
         elif mode == 'max_thres':
             mask = y_true < t
-        pred_mse = MSE(y_true=y_true * mask, y_pred=y_pred * mask)
-        standard_mse = MSE(y_true=y_true * mask, y_pred=y_standard * mask)
+        pred_mse = mse(y_true=y_true * mask, y_pred=y_pred * mask)
+        standard_mse = mse(y_true=y_true * mask, y_pred=y_standard * mask)
         pred_to_standard.append(pred_mse / standard_mse)
     return pred_to_standard
 
@@ -193,6 +194,53 @@ def avg_rel_mse(y_true_cube, y_pred_cube, y_standard_cube, thresholds, mode, bin
         pred_to_standard_cube.append(pred_to_standard)
     avg_ratio = np.mean(pred_to_standard_cube, axis=0)
     return avg_ratio
+
+
+# structural similarity
+# ----------------------------------
+def mean_ssim(true_cube, pred_cube):
+    nimg = true_cube.shape[0]
+    mssim = np.empty(nimg, dtype=np.float32)
+    for n in range(nimg):
+        result = ssim(true_cube[n], pred_cube[n], data_range=pred_cube[n].max() - pred_cube[n].min())
+        mssim[n] = result
+    mssim = mssim.mean()
+    return mssim
+
+
+# gaussian blurred relative MSE err
+# ----------------------------------
+def gb_mse(true_cube, pred_cube, gaussian_blur_std):
+    k = Gaussian2DKernel(gaussian_blur_std)
+    res_cube = pred_cube - true_cube
+    nimg = true_cube.shape[0]
+    mmse = np.empty(nimg, dtype=np.float32)
+    for n in range(nimg):
+        true = true_cube[n]
+        gb_res = convolve(res_cube[n], kernel=k)
+        result = np.sqrt((gb_res ** 2).sum() / (true ** 2).sum())
+        mmse[n] = result
+    return mmse.mean(), mmse.std()
+
+def mse_at_all_scales(true_cube, pred_cube, gaussian_blur_std=[0, 2, 4, 6, 10]):
+    mmse_list, errorbar_list = [], []
+    for std in gaussian_blur_std:
+        mmse, errorbar = gb_mse(true_cube, pred_cube, std)
+        mmse_list.append(mmse)
+        errorbar_list.append(errorbar)
+    return mmse_list, errorbar_list
+
+
+# pixel-wise comparison
+# ----------------------------------
+# def pix_comp(true_cube, pred_cube):
+
+#     for n in range(nimg):
+#         true = true_cube[n]
+#         gb_res = convolve(res_cube[n], kernel=k)
+#         result = np.sqrt((gb_res ** 2).sum() / (true ** 2).sum())
+#         mmse[n] = result
+#     return mmse.mean(), mmse.std()
 
 
 # visualization functions
