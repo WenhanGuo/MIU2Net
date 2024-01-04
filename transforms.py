@@ -18,19 +18,15 @@ class Compose(object):
     def __init__(self, transforms):
         self.transforms = transforms
 
-    def __call__(self, image, target=None):
+    def __call__(self, image, target):
         for t in self.transforms:
             image, target = t(image, target)
-
         return image, target
 
 
 class ToTensor(object):
-    def __call__(self, image, target=None):
-        if target:
-            return F.to_tensor(image), F.to_tensor(target)
-        else:
-            return F.to_tensor(image)
+    def __call__(self, image, target):
+        return F.to_tensor(image), F.to_tensor(target)
 
 
 class RandomHorizontalFlip(object):
@@ -100,24 +96,32 @@ class CenterCrop(object):
 
 # add gaussian noise to shear
 class AddGaussianNoise(object):
-    def __init__(self, n_galaxy, mean=0.):
+    def __init__(self, args):
         """
         calculate the gaussian noise standard deviation to be added to shear.
         please refer to https://articles.adsabs.harvard.edu/pdf/2004MNRAS.350..893H Eq.12. 面积替换为方形的
         noise_std^2 = {sigma_e^2 / 2} / {θ_G^2 * n_galaxy}
         """
-        self.n_galaxy = n_galaxy
-        self.mean = mean
+        self.n_galaxy = args.n_galaxy
         sigma_e = 0.4   # rms amplitude of the intrinsic ellipticity distribution
         theta_G = 0.205   # pixel side length in arcmin (gaussian smoothing window)
         variance = (sigma_e**2 / 2) / (theta_G**2 * self.n_galaxy)
         self.std = np.sqrt(variance)
-        # print('shear noise std =', self.std)
+        self.noise_seed = args.noise_seed
 
-    def __call__(self, image):
-        # image = image + np.random.normal(loc=self.mean, scale=self.std, size=image.shape)
-        image = image + torch.randn(image.size()) * self.std + self.mean
-        return image
+    def __call__(self, image, target):
+        if self.noise_seed == 0:
+            noise = torch.randn(image.shape) * self.std
+        else:
+            assert type(self.noise_seed) == int
+            seed = int(image[0][0][0] * 1e9)  # set random seed by the top left pixel of gamma1
+            mod_seed = [*range(1, self.noise_seed+1, 1)]  # construct list of [1, 2, 3, etc.] for seed modification
+            # round seed to nearest 10, then add a choice of modification with equal prob for each
+            seed = round(seed, ndigits=-1) + random.choice(mod_seed)
+            g = torch.Generator()  # pseudo random generator
+            noise = torch.randn(image.shape, generator=g.manual_seed(seed)) * self.std
+
+        return image + noise, target
         # for 50 galaxies per arcmin^2, std = 0.1951; 
         # for 20 galaxies per arcmin^2, std = 0.3085
 
@@ -156,8 +160,6 @@ class KS_rec(object):
             ks_kappa = self.shear_rec(-image[0], image[1])   # negative sign is important
             ks_kappa = torch.FloatTensor(ks_kappa)
             image = ks_kappa.unsqueeze(0)
-            # ks_kappa = np.float32(ks_kappa)
-            # image = np.expand_dims(ks_kappa, axis=0)
             return image, target
 
 
@@ -192,15 +194,14 @@ class Wiener(object):
         
         elif self.mode == 'add':
             wf_kappa, _ = self.wiener(-image[0], image[1])   # negative sign is important
-            wf_kappa = np.float32(wf_kappa)
-            image = np.concatenate([image, np.expand_dims(wf_kappa, axis=0)], axis=0)
+            wf_kappa = torch.FloatTensor(wf_kappa)
+            image = torch.concat((image, wf_kappa.unsqueeze(0)), dim=0)
             return image, target
         
         elif self.mode == 'only':        
             wf_kappa, _ = self.wiener(-image[0], image[1])   # negative sign is important
             wf_kappa = torch.FloatTensor(wf_kappa)
             image = wf_kappa.unsqueeze(0)
-            # image = np.expand_dims(wf_kappa, axis=0)
             return image, target
 
 
