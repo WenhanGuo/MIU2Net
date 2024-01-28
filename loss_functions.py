@@ -33,12 +33,13 @@ class FreqLoss(nn.Module):
 
 
 class FreqLoss1D(nn.Module):
-    def __init__(self, img_size, radius, weight=1e-3, device=None):
+    def __init__(self, img_size, radius, weight=1, device=None):
         super().__init__()
         self.l1 = nn.L1Loss()
         self.size = img_size
         self.radius = radius
         self.masks = self.create_masks().to(device)
+        self.freq_dis_weight = 1 / torch.sqrt(torch.arange(1, radius+1)).unsqueeze(0).to(device)
         self.weight = weight
     
     def create_masks(self):
@@ -62,7 +63,7 @@ class FreqLoss1D(nn.Module):
         rad_ps = torch.sum(ps2D.unsqueeze(2) * self.masks, dim=(3, 4))
         # sum across channel dimension
         rad_ps = torch.sum(rad_ps, dim=1)
-        return rad_ps
+        return rad_ps * self.freq_dis_weight
     
     def forward(self, output, target):
         ps_output = self.radial_power_spec(ps2D=self.power_spec(output))
@@ -71,18 +72,33 @@ class FreqLoss1D(nn.Module):
 
 
 class MSSSIMLoss(nn.Module):
-    def __init__(self):
+    def __init__(self, weight=1):
         super().__init__()
         self.ms_ssim = MS_SSIM(win_size=11, win_sigma=1.5, data_range=1.0, channel=1)
+        self.weight = weight
     
     def forward(self, output, target):
         denorm_target = (target - torch.min(target)) / (torch.max(target) - torch.min(target))
         denorm_output = (output - torch.min(output)) / (torch.max(output) - torch.min(output))
-        return 1.0 - self.ms_ssim(denorm_output, denorm_target)
+        loss = 1.0 - self.ms_ssim(denorm_output, denorm_target)
+        return loss * self.weight
+
+
+class SSIMLoss(nn.Module):
+    def __init__(self, weight=1):
+        super().__init__()
+        self.ssim = SSIM(win_size=11, win_sigma=1.5, data_range=1.0, channel=1)
+        self.weight = weight
+    
+    def forward(self, output, target):
+        denorm_target = (target - torch.min(target)) / (torch.max(target) - torch.min(target))
+        denorm_output = (output - torch.min(output)) / (torch.max(output) - torch.min(output))
+        loss = 1.0 - self.ssim(denorm_output, denorm_target)
+        return loss * self.weight
 
 
 class L1Mod(nn.Module):
-    def __init__(self, weight=1e3):
+    def __init__(self, weight=1):
         super().__init__()
         self.l1 = nn.L1Loss()
         self.weight = weight
@@ -92,27 +108,48 @@ class L1Mod(nn.Module):
 
 
 class HuberMod(nn.Module):
-    def __init__(self, delta, weight=1e3):
+    def __init__(self, delta, mean_penalty=0, weight=1):
         super().__init__()
         self.huber = nn.HuberLoss(delta=delta)
+        self.mean_penalty = mean_penalty
         self.weight = weight
     
     def forward(self, output, target):
-        return self.huber(output, target) * self.weight
+        mean_loss = abs(torch.mean(output) - torch.mean(target)) * self.mean_penalty
+        huber_loss = self.huber(output, target)
+        return (mean_loss + huber_loss) * self.weight
+
+
+class CharbonnierLoss(nn.Module):
+    """Charbonnier Loss (L1)"""
+
+    def __init__(self, eps=1e-9, weight=1):
+        super(CharbonnierLoss, self).__init__()
+        self.eps = eps
+        self.weight = weight
+
+    def forward(self, output, target):
+        diff = output - target
+        loss = torch.mean(torch.sqrt((diff * diff) + self.eps))
+        return loss * self.weight
 
 
 def loss_fn_selector(args, device):
     if args.spac_loss == 'huber':
-        spac_fn = HuberMod(delta=args.huber_delta, weight=1e3)
+        spac_fn = HuberMod(delta=args.huber_delta, weight=1e4)
     elif args.spac_loss == 'l1':
         spac_fn = L1Mod(weight=1e3)
     elif args.spac_loss == 'ms-ssim':
-        spac_fn = MSSSIMLoss()
+        spac_fn = MSSSIMLoss(weight=10)
+    elif args.spac_loss == 'charbonnier':
+        spac_fn = CharbonnierLoss(weight=1e2)
+    if args.spac_loss == 'huber-mean':
+        spac_fn = HuberMod(delta=args.huber_delta, mean_penalty=0.1, weight=1e4)
     
     if args.freq_loss == 'freq':
-        freq_fn = FreqLoss(img_size=args.resize, radius=args.resize/32, weight=1, device=device)
+        freq_fn = FreqLoss(img_size=args.resize, radius=args.f1d_radius, weight=1, device=device)
     elif args.freq_loss == 'freq1d':
-        freq_fn = FreqLoss1D(img_size=args.resize, radius=args.resize/32, weight=1e-3, device=device)
+        freq_fn = FreqLoss1D(img_size=args.resize, radius=args.f1d_radius, weight=1e-3, device=device)
 
     if args.freq_loss == None:
         return spac_fn
