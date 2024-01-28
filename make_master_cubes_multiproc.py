@@ -23,7 +23,7 @@ def shape_noise(n_galaxy):
 
 def downsample(image, size):
     image = torch.tensor(np.float32(image))
-    image = resize(image.unsqueeze(0), size=size)
+    image = resize(image.unsqueeze(0), size=size, antialias=True)
     return image.numpy().astype(np.float32)[0]
 
 def save_cube(true, ml, ks, wiener, sparse, mcalens, save_dir, save_name):
@@ -53,23 +53,26 @@ def make_cube(args, fname):
 
     # initialize CosmoStat shear class
     D = shear_data()
-    D.g1 = np.float32(-shear1)   # negative sign is important
+    # D.g1 = np.float32(-shear1)   # negative sign is important
+    D.g1 = np.float32(shear1)   # after fixing my_dataset
     D.g2 = np.float32(shear2)
     noise_std = shape_noise(n_galaxy=args.n_galaxy)
     CovMat = np.ones((args.crop, args.crop)) * (noise_std**2)
-    D.Ncov = CovMat
-    D.nx, D.ny = args.crop, args.crop
+    D.Ncov = downsample(CovMat, size=args.resize)
+    D.nx, D.ny = args.resize, args.resize
 
     # create the mass mapping structure and initialize it
     M = massmap2d(name='mass')
     psWT_gen1 = pysparse.MRStarlet(bord=1, gen2=False, nb_procs=1, verbose=0)
     psWT_gen2 = pysparse.MRStarlet(bord=1, gen2=True, nb_procs=1, verbose=0)
-    M.init_massmap(nx=args.crop, ny=args.crop, pass_class=[psWT_gen1, psWT_gen2])
+    M.init_massmap(nx=args.resize, ny=args.resize, pass_class=[psWT_gen1, psWT_gen2])
+
     p_signal = fits.open('./pspec/signal_power_spectrum.fits')[0].data
     if args.n_galaxy == 1059:
         p_noise = fits.open('./pspec/noise_power_spectrum_g1059.fits')[0].data
     if args.n_galaxy == 50:
-        p_noise = fits.open('./pspec/noise_power_spectrum_g50.fits')[0].data
+        p_noise = fits.open('./pspec/noise_power_spectrum_g50_256.fits')[0].data
+        # p_noise = fits.open('./pspec/noise_power_spectrum_g50.fits')[0].data
     elif args.n_galaxy == 30:
         p_noise = fits.open('./pspec/noise_power_spectrum_g30.fits')[0].data
     elif args.n_galaxy == 20:
@@ -104,14 +107,6 @@ def make_cube(args, fname):
                                                     Bmode=False, 
                                                     ktr=None, 
                                                     pass_class=[psWT_gen1, psWT_gen2])
-
-    # downsample
-    true = downsample(true, size=args.resize)
-    pred = downsample(pred, size=args.resize)
-    ks = downsample(ks, size=args.resize)
-    wiener = downsample(wiener, size=args.resize)
-    sparse = downsample(sparse, size=args.resize)
-    mcalens = downsample(mcalens, size=args.resize)
 
     save_cube(true, pred, ks, wiener, sparse, mcalens, save_dir=args.save_dir, save_name=fname)
 
