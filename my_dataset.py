@@ -28,19 +28,72 @@ class ImageDataset(Dataset):
         gaus_noise: adding gaussian noise to input data (gamma) prior to training 
         """
         self.img_names = Table.read(catalog)
-        self.n_galaxy = args.n_galaxy
         self.transforms = transforms
-        self.gaus_blur = args.gaus_blur
+        self.reduced_shear = args.reduced_shear
+        self.mask_frac = args.mask_frac
         self.resize = args.resize
         self.save_noisy_shear = args.save_noisy_shear
         self.save_noisy_shear_dir = args.save_noisy_shear_dir
         self.wiener_res = args.wiener_res
+
+    def __len__(self):
+        return len(self.img_names)
+
+    def read_img(self, idx, img_type=['gamma1', 'gamma2', 'kappa']):
+        img_name = self.img_names[img_type][idx][0]   # get single image name
+        with fits.open(img_name, memmap=False) as f:
+            img = f[0].data   # read image into numpy array
+        return np.float32(img), img_name   # force apply float32 to resolve endian conflict
+
+    def __getitem__(self, idx):
+        # read in images
+        gamma1, g1name = self.read_img(idx, img_type='gamma1')
+        gamma2, _ = self.read_img(idx, img_type='gamma2')
+        kappa, _ = self.read_img(idx, img_type='kappa')
+
+        # reformat data shapes
+        gamma = np.array([-gamma1, gamma2])  # negative sign is important
+        gamma = np.moveaxis(gamma, 0, 2)
+        kappa = np.expand_dims(kappa, 2)
+
+        # apply transforms
+        image, target = self.transforms(gamma, kappa)
+
+        # if self.wiener_res == True:
+        #     # target = true - wiener, assuming args.wiener == 'add' and image[2] is wiener
+        #     target = target - image[2]
+
+        # save noisy shear data
+        if self.save_noisy_shear == True:
+            save_name = os.path.basename(g1name)[:-14] + 'noisy_shear.fits'
+            save_path = os.path.join(self.save_noisy_shear_dir, save_name)
+            fits.writeto(save_path, np.float32(image), overwrite=True)
+
+        # gamma shape = torch.Size([2, 512, 512]); kappa shape = torch.Size([1, 512, 512])
+        # if ks: gamma shape = torch.Size([3, 512, 512]); last channel is ks map
+        return image, target
+
+
+'''
+class ImageDataset_shear(Dataset):
+    def __init__(self, args, catalog, transforms):
+        """
+        catalog: name of .csv file containing image names to be read
+        data_dir: path to data directory containing gamma1, gamma2, kappa folders
+        transforms: equivariant transformations to input data (gamma) and target (kappa) prior to training
+        gaus_noise: adding gaussian noise to input data (gamma) prior to training 
+        """
+        self.img_names = Table.read(catalog)
+        self.transforms = transforms
+        self.resize = args.resize
+        self.save_noisy_shear = args.save_noisy_shear
+        self.save_noisy_shear_dir = args.save_noisy_shear_dir
+        self.args = args
     
     def __len__(self):
         return len(self.img_names)
     
-    def read_img(self, idx, img_type=['gamma1', 'gamma2', 'kappa']):
-        # img_name = self.img_names[img_type][idx][2:-2]   # bypass strange indexing of '["img_name"]' in py3.6 env
+    def read_img(self, idx, img_type=['gamma1', 'gamma2']):
         img_name = self.img_names[img_type][idx][0]   # get single image name
         with fits.open(img_name, memmap=False) as f:
             img = f[0].data   # read image into numpy array
@@ -50,42 +103,31 @@ class ImageDataset(Dataset):
         # read in images
         gamma1, g1name = self.read_img(idx, img_type='gamma1')
         gamma2, _ = self.read_img(idx, img_type='gamma2')
-        kappa, _ = self.read_img(idx, img_type='kappa')
 
         # reformat data shapes
-        gamma = np.array([gamma1, gamma2])
+        gamma = np.array([-gamma1, gamma2])  # negative sign is important
         gamma = np.moveaxis(gamma, 0, 2)
-        kappa = np.expand_dims(kappa, 2)
-        
-        # add gaussian noise to shear only
-        tt = T.ToTensor()
-        gn = T.AddGaussianNoise(n_galaxy=self.n_galaxy)
-        image = gn(tt(gamma))
-        target = tt(kappa)
 
+        # add gaussian noise to shear
+        tt = T.ToTensor()
+        gn = T.AddGaussianNoise(args=self.args)
+        image, target = gn(*tt(gamma, gamma))
+        
         # apply transforms
         image, target = self.transforms(image, target)
-        if self.wiener_res == True:
-            # target = true - wiener, assuming args.wiener == 'add' and image[2] is wiener
-            target = target - image[2]
-
+        image = resize(image, size=self.resize, antialias=True)
+        target = resize(target, size=self.resize, antialias=True)
+        
         # save noisy shear data
         if self.save_noisy_shear == True:
             save_name = os.path.basename(g1name)[:-14] + 'noisy_shear.fits'
             save_path = os.path.join(self.save_noisy_shear_dir, save_name)
             fits.writeto(save_path, np.float32(image), overwrite=True)
-
-        if self.gaus_blur == True:
-            gb = GaussianBlur(kernel_size=5, sigma=2.0)
-            image = gb(image)
-        
-        image = resize(image, size=self.resize)
-        target = resize(target, size=self.resize)
         
         # gamma shape = torch.Size([2, 512, 512]); kappa shape = torch.Size([1, 512, 512])
         # if ks: gamma shape = torch.Size([3, 512, 512]); last channel is ks map
         return image, target
-
+'''
 
 
 class ImageDataset_kappa3d(Dataset):
