@@ -121,14 +121,16 @@ def radial_pspec(ps2D, binsize=1.0, logspacing=False):
 
     yy, xx = make_radial_arrays(ps2D.shape)
     dists = np.sqrt(yy**2 + xx**2)
-    nbins = int(np.round(dists.max() / binsize) + 1)
+    nbins = int(64 / binsize)  # for no logspacing; we previously used nbins=80 for whole freq range
+    # nbins = int(np.round(dists.max() / binsize) + 1)  # nbins = 227 for 256x256 map
     yy_freq, xx_freq = make_radial_freq_arrays(ps2D.shape)
     freqs_dist = np.sqrt(yy_freq**2 + xx_freq**2)
     zero_freq_val = freqs_dist[np.nonzero(freqs_dist)].min() / 2.
     freqs_dist[freqs_dist == 0] = zero_freq_val
 
-    max_bin = 0.5
+    max_bin = 0.1
     min_bin = 1.0 / min(ps2D.shape)
+    # min_bin = 1e-9
     if logspacing:
         bins = np.logspace(np.log10(min_bin), np.log10(max_bin), nbins + 1)
     else:
@@ -141,7 +143,6 @@ def radial_pspec(ps2D, binsize=1.0, logspacing=False):
                                            bins=bins,
                                            statistic=np.nanmean)
     bin_cents = (bin_edge[1:] + bin_edge[:-1]) / 2.
-
     return bin_cents, ps1D
 
 # calculate 1D power spectrum from image
@@ -158,11 +159,12 @@ def avg_P(cube, binsize=1.0, logspacing=False):
         freqs, ps = P(cube[idx], binsize=binsize, logspacing=logspacing)
         ps_cube.append(ps)
         avg_ps = np.mean(ps_cube, axis=0)
-    return freqs, avg_ps
+        std_ps = np.std(ps_cube, axis=0)
+    return freqs, avg_ps, std_ps
 
 def pix_to_arcmin(pixel_value):
     # Convert a value in pixel units to the given angular unit.
-    pixel_scale = 1.75*60/512 * u.arcmin / u.pix
+    pixel_scale = 1.75*60/256 * u.arcmin / u.pix
     return pixel_value * pixel_scale
 
 def spatial_freq_unit_conversion(pixel_value):
@@ -264,9 +266,14 @@ def cbar(fig, cax):
     fig.subplots_adjust(right=0.87)
     plt.colorbar(cax=cax, orientation="vertical")
 
-def plot_pspec(xvals, ps1D, logy, label, c=None):
+def plot_pspec(xvals, ps1D, logy, label, yerr=False, fmt=None, errfmt='shade', c=None):
     xvals = spatial_freq_unit_conversion(xvals).value
     plt.xscale('log')
     if logy == True:
         plt.yscale('log')
     plt.plot(xvals, ps1D, c=c, label=label)
+    if type(yerr) == np.ndarray:
+        if errfmt == 'shade':
+            plt.fill_between(xvals, ps1D-yerr, ps1D+yerr, alpha=0.2, color=c)
+        elif errfmt == 'bar':
+            plt.errorbar(xvals, ps1D, yerr=yerr, c=c)

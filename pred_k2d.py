@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '5'
 
 from model_u2net import u2net_full
 import torch
@@ -22,7 +22,7 @@ def save_img(pred, true, res, fname):
 
 
 def main(args):
-    catalog_name = os.path.join(args.dir, 'test.ecsv')
+    catalog_name = os.path.join(args.dir, 'validation.ecsv')
     test_cat = Table.read(catalog_name)
     assert args.num <= len(test_cat)
     test_cat = test_cat[:args.num]
@@ -31,11 +31,16 @@ def main(args):
     test_data = ImageDataset(catalog=catalog_name, 
                              args=args, 
                              transforms=T.Compose([
+                                 T.ToTensor(), 
+                                 T.ReducedShear(args), 
+                                 T.AddGaussianNoise(args), 
                                  T.KS_rec(args), 
                                  T.CenterCrop(size=args.crop), 
                                  T.Wiener(args), 
                                  T.sparse(args), 
-                                 T.MCALens(args)])
+                                 T.MCALens(args), 
+                                 T.Resize(size=args.resize), 
+                                 T.AddStarMask(args)])
                              )
     test_data = Subset(test_data, np.arange(args.num))
     test_dataloader = DataLoader(test_data, shuffle=False, batch_size=1, num_workers=args.cpu)
@@ -114,12 +119,15 @@ def get_args():
     parser = argparse.ArgumentParser(description='Predict kappa from test shear')
     parser.add_argument('load', type=str, help='name of weights file')
     parser.add_argument("-g", "--n-galaxy", default=50, type=float, help='number of galaxies per arcmin (to determine noise level)')
+    parser.add_argument("--noise-seed", default=1, type=int, help='how many noise realizations for each training image; 0 for new realization every time')
     parser.add_argument("--num", default=8, type=int, help='number of test images to run')
     parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/data_1024_2d', type=str, help='data directory')
     parser.add_argument("--cpu", default=4, type=int, help='number of cpu cores to use')
     parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
     parser.add_argument("--crop", default=512, type=int, help='crop 1024x1024 kappa to this size')
     parser.add_argument("--resize", default=256, type=int, help='downsample kappa to this size')
+    parser.add_argument("--reduced-shear", default=False, action='store_true', help='use reduced shear (g) instead of shear (gamma)')
+    parser.add_argument("--mask-frac", default=0, type=float, help='randomly mask this fraction of pixels')
     parser.add_argument("--ks", default='off', type=str, choices=['off', 'add', 'only'], help='KS93 deconvolution (no KS, KS as an extra channel, no shear and KS only)')
     parser.add_argument("--wiener", default='off', type=str, choices=['off', 'add', 'only'], help='Wiener reconstruction')
     parser.add_argument("--sparse", default='off', type=str, choices=['off', 'add', 'only'], help='sparse reconstruction')

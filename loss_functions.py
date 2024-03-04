@@ -39,7 +39,6 @@ class FreqLoss1D(nn.Module):
         self.size = img_size
         self.radius = radius
         self.masks = self.create_masks().to(device)
-        self.freq_dis_weight = 1 / torch.sqrt(torch.arange(1, radius+1)).unsqueeze(0).to(device)
         self.weight = weight
     
     def create_masks(self):
@@ -60,10 +59,11 @@ class FreqLoss1D(nn.Module):
         return pspec_shifted
     
     def radial_power_spec(self, ps2D):
-        rad_ps = torch.sum(ps2D.unsqueeze(2) * self.masks, dim=(3, 4))
+        # radial average power spectrum
+        rad_ps = torch.mean(ps2D.unsqueeze(2) * self.masks, dim=(3, 4))
         # sum across channel dimension
         rad_ps = torch.sum(rad_ps, dim=1)
-        return rad_ps * self.freq_dis_weight
+        return rad_ps
     
     def forward(self, output, target):
         ps_output = self.radial_power_spec(ps2D=self.power_spec(output))
@@ -135,21 +135,25 @@ class CharbonnierLoss(nn.Module):
 
 
 def loss_fn_selector(args, device):
+    # a, b (alpha, beta declared in args) set the relative importance of spatial and frequency terms
+    # if a = b, default weights in functions will scale each term to be approx equal when training converges
+    a, b = args.alpha, args.beta
+
     if args.spac_loss == 'huber':
-        spac_fn = HuberMod(delta=args.huber_delta, weight=1e4)
+        spac_fn = HuberMod(delta=args.huber_delta, weight=1e4*a)
     elif args.spac_loss == 'l1':
-        spac_fn = L1Mod(weight=1e3)
+        spac_fn = L1Mod(weight=1e3*a)
     elif args.spac_loss == 'ms-ssim':
-        spac_fn = MSSSIMLoss(weight=10)
+        spac_fn = MSSSIMLoss(weight=10*a)
     elif args.spac_loss == 'charbonnier':
-        spac_fn = CharbonnierLoss(weight=1e2)
+        spac_fn = CharbonnierLoss(weight=1e2*a)
     if args.spac_loss == 'huber-mean':
-        spac_fn = HuberMod(delta=args.huber_delta, mean_penalty=0.1, weight=1e4)
-    
+        spac_fn = HuberMod(delta=args.huber_delta, mean_penalty=0.1, weight=1e4*a)
+
     if args.freq_loss == 'freq':
-        freq_fn = FreqLoss(img_size=args.resize, radius=args.f1d_radius, weight=1, device=device)
+        freq_fn = FreqLoss(img_size=args.resize, radius=args.f1d_radius, weight=1*b, device=device)
     elif args.freq_loss == 'freq1d':
-        freq_fn = FreqLoss1D(img_size=args.resize, radius=args.f1d_radius, weight=1e-3, device=device)
+        freq_fn = FreqLoss1D(img_size=args.resize, radius=args.f1d_radius, weight=10*b, device=device)
 
     if args.freq_loss == None:
         return spac_fn

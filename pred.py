@@ -31,6 +31,8 @@ def main(args):
     test_data = ImageDataset(catalog=catalog_name, 
                              args=args, 
                              transforms=T.Compose([
+                                 T.ToTensor(), 
+                                 T.AddGaussianNoise(args), 
                                  T.KS_rec(args), 
                                  T.CenterCrop(size=args.crop), 
                                  T.Wiener(args), 
@@ -84,23 +86,6 @@ def main(args):
                 y_true = np.float32(target[0].cpu())
                 res = y_true - y_pred
                 cube = np.concatenate([np.float32(image[0].cpu()), y_true, y_pred, res], axis=0)
-            '''
-            image.shape = torch.Size([1, 2, 512, 512])
-            target.shape = torch.Size([1, 1, 512, 512])
-            len(outputs) = 7
-            outputs[0].shape = torch.Size([1, 1, 512, 512]) ==> reconstructed image
-            outputs[1].shape = torch.Size([1, 1, 512, 512]) ==> Laplacian pyramid finest layer
-            outputs[2].shape = torch.Size([1, 1, 256, 256])
-            outputs[3].shape = torch.Size([1, 1, 128, 128])
-            outputs[4].shape = torch.Size([1, 1, 56, 56])
-            outputs[5].shape = torch.Size([1, 1, 32, 32])
-            outputs[6].shape = torch.Size([1, 1, 16, 16]) ==> Laplacian pyramid coarest layer
-            y_pred.shape = y_true.shape = res.shape = (1, 512, 512)
-            cube.shape = (n, 512, 512), n = shear*2 + ks + wf + sp + mca + pred + true + res + laplacian_pyramid*6
-            '''
-            for y_side in outputs[1:]:
-                upsampled = resize(y_side, size=cube.shape[-2:], interpolation='nearest')
-                cube = np.concatenate([cube, np.float32(upsampled[0].cpu())], axis=0)
             print('writeto cube shape =', cube.shape)
 
             map_name = test_cat['kappa'][test_step][0]
@@ -114,6 +99,7 @@ def get_args():
     parser = argparse.ArgumentParser(description='Predict kappa from test shear')
     parser.add_argument('load', type=str, help='name of weights file')
     parser.add_argument("-g", "--n-galaxy", default=50, type=float, help='number of galaxies per arcmin (to determine noise level)')
+    parser.add_argument("--noise-seed", default=1, type=int, help='how many noise realizations for each training image; 0 for new realization every time')
     parser.add_argument("--num", default=8, type=int, help='number of test images to run')
     parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/data_1024_2d', type=str, help='data directory')
     parser.add_argument("--cpu", default=4, type=int, help='number of cpu cores to use')

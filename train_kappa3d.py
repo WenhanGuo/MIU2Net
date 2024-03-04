@@ -1,6 +1,6 @@
 #! -*- coding: utf-8 -*-
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '5'
+os.environ['CUDA_VISIBLE_DEVICES'] = '5,6'
 
 from model_u2net import u2net_full
 import torch
@@ -10,8 +10,10 @@ from torchvision.transforms import GaussianBlur
 from torch.utils.data import DataLoader
 from my_dataset import ImageDataset_kappa3d
 from torch.utils.tensorboard import SummaryWriter
-from kornia.geometry.transform import resize
+from torchvision.transforms.functional import resize
 from kornia.filters.gaussian import gaussian_blur2d
+from focal_frequency_loss import FocalFrequencyLoss as FFL
+from pytorch_msssim import SSIM, MS_SSIM
 
 import shutil
 import math
@@ -62,31 +64,59 @@ def create_lr_scheduler(optimizer,
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=f)
 
 
-class HuberLogisticLoss(nn.Module):
-    def __init__(self, delta):
-        super().__init__()
-        self.huber = nn.HuberLoss(delta=delta)
-    
-    def gen_logistic(self, x, B=25, K=1, nu=0.1, Q=5, A=0, C=1):
-        Y = A + (K - A) / ((C + Q * torch.e**(-B*abs(x)))**(1/nu))
-        return torch.mean(Y)
-        
-    def forward(self, output, target):
-        return self.huber(output, target) + self.gen_logistic(output - target)
-
-
-class L1LogisticLoss(nn.Module):
+class SSIMLoss(nn.Module):
     def __init__(self):
         super().__init__()
-    
-    def l1_gen_logistic(self, x, B=25, K=100, nu=0.1, Q=5, A=0, C=1):
-        l1 = abs(x) - 0.3
-        l1[abs(x) < 0.3] = 0.
-        Y = A + (K - A) / ((C + Q * torch.e**(-B*abs(x)))**(1/nu))
-        return torch.mean(Y + l1 * 20)
+        self.ssim = SSIM(win_size=11, win_sigma=1.5, data_range=1.0, channel=1, nonnegative_ssim=True)
     
     def forward(self, output, target):
-        return self.l1_gen_logistic(output - target)
+        denorm_target = (target - torch.min(target)) / (torch.max(target) - torch.min(target))
+        denorm_output = (output - torch.min(output)) / (torch.max(output) - torch.min(output))
+        return 1.0 - self.ssim(denorm_output, denorm_target)
+
+
+class L1SSIMLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.ssim = SSIM(win_size=11, win_sigma=1.5, data_range=1.0, channel=1, nonnegative_ssim=True)
+        self.l1 = nn.L1Loss()
+    
+    def forward(self, output, target):
+        denorm_target = (target - torch.min(target)) / (torch.max(target) - torch.min(target))
+        denorm_output = (output - torch.min(output)) / (torch.max(output) - torch.min(output))
+        return 1.0 - self.ssim(denorm_output, denorm_target) + self.l1(output, target)
+
+
+class MSSSIMLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.ms_ssim = MS_SSIM(win_size=11, win_sigma=1.5, data_range=1.0, channel=1)
+    
+    def forward(self, output, target):
+        denorm_target = (target - torch.min(target)) / (torch.max(target) - torch.min(target))
+        denorm_output = (output - torch.min(output)) / (torch.max(output) - torch.min(output))
+        return 1.0 - self.ms_ssim(denorm_output, denorm_target)
+
+class L1MSSSIMLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.ms_ssim = MS_SSIM(win_size=11, win_sigma=1.5, data_range=1.0, channel=1)
+        self.l1 = nn.L1Loss()
+    
+    def forward(self, output, target):
+        denorm_target = (target - torch.min(target)) / (torch.max(target) - torch.min(target))
+        denorm_output = (output - torch.min(output)) / (torch.max(output) - torch.min(output))
+        return 1.0 - self.ms_ssim(denorm_output, denorm_target) + self.l1(output, target)
+
+
+class HuberFocalFrequencyLoss(nn.Module):
+    def __init__(self, delta, ffl_weight, ffl_alpha):
+        super().__init__()
+        self.huber = nn.HuberLoss(delta=delta)
+        self.ffl = FFL(loss_weight=ffl_weight, alpha=ffl_alpha)
+    
+    def forward(self, output, target):
+        return self.huber(output, target) + self.ffl(output, target)
 
 
 def build_laplacian_pyramid(tensor, max_level=5):
@@ -119,8 +149,8 @@ def main(args):
     else:
         target_gb = None
     train_data = ImageDataset_kappa3d(catalog=os.path.join(args.dir, 'train.ecsv'), 
+                                      args=args, 
                                       z_cat=args.zcat, 
-                                      n_galaxy=args.n_galaxy, 
                                       shear_zslices=shear_zslices, 
                                       kappa_zslices=kappa_zslices, 
                                       transforms=T.Compose([
@@ -136,8 +166,8 @@ def main(args):
                                       gaus_blur=target_gb
                                       )
     val_data = ImageDataset_kappa3d(catalog=os.path.join(args.dir, 'validation.ecsv'), 
+                                    args=args, 
                                     z_cat=args.zcat, 
-                                    n_galaxy=args.n_galaxy, 
                                     shear_zslices=shear_zslices, 
                                     kappa_zslices=kappa_zslices, 
                                     transforms=T.Compose([
@@ -164,6 +194,8 @@ def main(args):
         in_channels += int(len(shear_zslices))
     if args.mcalens == 'add':
         in_channels += int(len(shear_zslices))
+    elif args.ks == 'only' or args.wiener == 'only':
+        in_channels = int(len(shear_zslices))
     print('in_channels =', in_channels)
     model = u2net_full(in_ch=in_channels, mode=args.assemble_mode)
 
@@ -176,12 +208,22 @@ def main(args):
     torch.cuda.empty_cache()
 
     # setting loss function
-    if args.loss_fn == 'Huber':
+    if args.loss_fn == 'l1':
+        loss_fn = nn.L1Loss()
+    elif args.loss_fn == 'Huber':
         loss_fn = nn.HuberLoss(delta=args.huber_delta)
-    elif args.loss_fn == 'HuberLogistic':
-        loss_fn = HuberLogisticLoss(delta=args.huber_delta)
-    elif args.loss_fn == 'L1Logistic':
-        loss_fn = L1LogisticLoss()
+    elif args.loss_fn == 'SSIM':
+        loss_fn = SSIMLoss()
+    elif args.loss_fn == 'MS-SSIM':
+        loss_fn = MSSSIMLoss()
+    elif args.loss_fn == 'l1-SSIM':
+        loss_fn = L1SSIMLoss()
+    elif args.loss_fn == 'l1-MS-SSIM':
+        loss_fn = L1MSSSIMLoss()
+    elif args.loss_fn == 'FFL':
+        loss_fn = FFL(loss_weight=args.ffl_weight, alpha=args.ffl_alpha)
+    elif args.loss_fn == 'HuberFFL':
+        loss_fn = HuberFocalFrequencyLoss(delta=args.huber_delta, ffl_weight=args.ffl_weight, ffl_alpha=args.ffl_alpha)
     loss_fn = loss_fn.to(device)
 
     # setting optimizer & lr scheduler
@@ -189,7 +231,8 @@ def main(args):
                                   weight_decay=args.weight_decay)
     lr_scheduler = create_lr_scheduler(optimizer, len(train_loader), args.epochs,
                                        warmup=True, warmup_epochs=3)
-    scaler = torch.cuda.amp.GradScaler()   # Use torch.cuda.amp for mixed precision training
+    # Use torch.cuda.amp for mixed precision training
+    scaler = torch.cuda.amp.GradScaler() if args.mixed_precision == True else None
 
     # use tensorboard to visualize computation
     writer = SummaryWriter('../tlogs_kappa3d')
@@ -220,7 +263,8 @@ def main(args):
                 # loss_targ_peak = loss_fn(outputs_peak[0], target_peak)
                 # native mode: based on true target for every side output
                 if args.assemble_mode == '1x1conv':
-                    losses = [loss_fn(outputs[j], target) for j in range(len(outputs))]
+                    losses = [loss_fn(output, target) for output in outputs]
+                # laplacian pyramid mode
                 elif args.assemble_mode == 'laplacian_pyr':
                     target_pyr = build_laplacian_pyramid(target, max_level=5)
                     losses = [loss_fn(outputs[j+1], target_pyr[j]) for j in range(len(target_pyr))]
@@ -329,16 +373,25 @@ def get_args():
     # parser.add_argument("--kappa-z", default=[32, 36], help='list of kappa z slices to predict')
 
     parser.add_argument("--gaus-blur", default=False, action='store_true', help='whether to blur shear before feeding into ML')
+    parser.add_argument("--mixed-precision", default=False, action='store_true', help='Use torch.cuda.amp for mixed precision training')
+
     parser.add_argument("--ks", default='off', type=str, choices=['off', 'add', 'only'], help='KS93 deconvolution (no KS, KS as an extra channel, no shear and KS only)')
     parser.add_argument("--wiener", default='off', type=str, choices=['off', 'add', 'only'], help='Wiener reconstruction')
     parser.add_argument("--sparse", default='off', type=str, choices=['off', 'add', 'only'], help='sparse reconstruction')
     parser.add_argument("--mcalens", default='off', type=str, choices=['off', 'add', 'only'], help='MCALens reconstruction')
-    parser.add_argument("--loss-fn", default='Huber', type=str, choices=['HuberLogistic', 'L1Logistic', 'Huber'], help='loss function')
+
+    parser.add_argument("--loss-fn", default='HuberFFL', type=str, choices=['l1', 'Huber', 'SSIM', 'MS-SSIM', 'l1-SSIM', 'l1-MS-SSIM', 'FFL', 'HuberFFL'], help='loss function')
+    parser.add_argument("--wiener-res", default=False, action='store_true', help='if the target is true - wiener')
     parser.add_argument("--assemble-mode", default='1x1conv', type=str, choices=['1x1conv', 'laplacian_pyr'], help='experimental feature')
-    parser.add_argument("--huber-delta", default=50, type=float, help='delta value for Huberloss')
+    parser.add_argument("--huber-delta", default=50.0, type=float, help='delta value for Huberloss')
+    parser.add_argument("--ffl-weight", default=2.0, type=float, help='weight for Focal Frequency Loss')
+    parser.add_argument("--ffl-alpha", default=1.0, type=float, help='alpha for Focal Frequency Loss')
     parser.add_argument("--weight-decay", default=1e-2, type=float, help='weight decay for AdamW optimizer')
     parser.add_argument("--param-count", default=False, action='store_true', help='show model parameter count summary')
-    
+
+    parser.add_argument("--save-noisy-shear", default=False, action='store_true', help='write shear with added gaussian noise to disk')
+    parser.add_argument("--save-noisy-shear-dir", default='/share/lirui/Wenhan/WL/kappa_map/result/noisy_shear', type=str)
+
     return parser.parse_args()
 
 

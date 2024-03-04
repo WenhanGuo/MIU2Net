@@ -3,13 +3,14 @@ import numpy as np
 import glob
 import matplotlib
 import matplotlib.pyplot as plt
+from matplotlib import gridspec
 import seaborn as sns
 import astropy.io.fits as fits
 matplotlib.rc_file_defaults()
 
 # %%
-from stats.summary_stats_func import read_folder
-fnames = glob.glob('/Users/danny/Desktop/WL/kappa_map/result/mc_unet_cont_c5r2_freq1dhuber_g50/*.fits')[:10]
+from summary_stats_func import read_folder
+fnames = glob.glob('/Users/danny/Desktop/WL/kappa_map/result/master_cubes_bare_g20/*.fits')[:500]
 true_cube, ml_cube, ks_cube, wiener_cube, sparse_cube, mcalens_cube = read_folder(fnames)
 # ml_cube = ml_cube + wiener_cube
 
@@ -19,7 +20,7 @@ true_cube, ml_cube, ks_cube, wiener_cube, sparse_cube, mcalens_cube = read_folde
 # %%
 from summary_stats_func import avg_peak_count
 # gb_std = 4.8762
-gb_std = 1
+gb_std = 0.1
 peak_thres = 0
 (true_avgp, true_pbin), (true_avgsnr, true_snrbin) = avg_peak_count(cube=true_cube, gaussian_blur_std=gb_std, peak_thres=peak_thres)
 (ml_avgp, ml_pbin), (ml_avgsnr, ml_snrbin) = avg_peak_count(cube=ml_cube, gaussian_blur_std=gb_std, peak_thres=peak_thres)
@@ -29,12 +30,22 @@ peak_thres = 0
 (mcalens_avgp, mcalens_pbin), (mcalens_avgsnr, mcalens_snrbin) = avg_peak_count(cube=mcalens_cube, gaussian_blur_std=gb_std, peak_thres=peak_thres)
 
 # %%
+# normalized peak count
+from summary_stats_func import avg_peak_count
+# gb_std = 4.8762
+gb_std = 0.1
+peak_thres = 0
+(true_avgp, true_pbin), (true_avgsnr, true_snrbin) = avg_peak_count(cube=(true_cube)/np.std(true_cube), gaussian_blur_std=gb_std, peak_thres=peak_thres)
+(ml_avgp, ml_pbin), (ml_avgsnr, ml_snrbin) = avg_peak_count(cube=(ml_cube)/np.std(ml_cube), gaussian_blur_std=gb_std, peak_thres=peak_thres)
+# (ks_avgp, ks_pbin), (ks_avgsnr, ks_snrbin) = avg_peak_count(cube=ks_cube, gaussian_blur_std=gb_std, peak_thres=peak_thres)
+(wiener_avgp, wiener_pbin), (wiener_avgsnr, wiener_snrbin) = avg_peak_count(cube=(wiener_cube)/np.std(wiener_cube), gaussian_blur_std=gb_std, peak_thres=peak_thres)
+# %%
 sns.set()
 fig = plt.figure(figsize=(8, 4))
 plt.subplot(1, 2, 1)
 plt.title(f"peak count (gaus blur std = {gb_std})")
 plt.plot(true_pbin, true_avgp, label='true', c='k', ls='--')
-plt.plot(ml_pbin, ml_avgp, label='ml')
+plt.plot(ml_pbin, ml_avgp*4.8, label='ml')
 plt.plot(ks_pbin, ks_avgp, label='ks')
 plt.plot(wiener_pbin, wiener_avgp, label='wiener')
 plt.plot(sparse_pbin, sparse_avgp, label='sparse')
@@ -47,7 +58,7 @@ plt.legend()
 plt.subplot(1, 2, 2)
 plt.title(f"peak count (gaus blur std = {gb_std})")
 plt.plot(true_snrbin, true_avgsnr, label='true', c='k', ls='--')
-plt.plot(ml_snrbin, ml_avgsnr, label='ml')
+plt.plot(ml_snrbin, ml_avgsnr*8, label='ml')
 plt.plot(ks_snrbin, ks_avgsnr, label='ks')
 plt.plot(wiener_snrbin, wiener_avgsnr, label='wiener')
 plt.plot(sparse_snrbin, sparse_avgsnr, label='sparse')
@@ -64,48 +75,60 @@ plt.show()
 # ## Power Spectrum
 
 # %%
-from stats.summary_stats_func import avg_P, plot_pspec
+from summary_stats_func import avg_P, plot_pspec
 
 # plot 1D power spectrums for truth & all recovery methods
-f_true, p_true = avg_P(cube=true_cube, binsize=0.8, logspacing=False)
-f_ml, p_ml = avg_P(cube=ml_cube, binsize=0.8, logspacing=False)
-f_ks, p_ks = avg_P(cube=ks_cube, binsize=0.8, logspacing=False)
-f_wiener, p_wiener = avg_P(cube=wiener_cube, binsize=0.8, logspacing=False)
-f_sparse, p_sparse = avg_P(cube=sparse_cube, binsize=0.8, logspacing=False)
-f_mcalens, p_mcalens = avg_P(cube=mcalens_cube, binsize=0.8, logspacing=False)
+f_true, p_true, ci_true = avg_P(cube=true_cube, binsize=1.5, logspacing=False)
+f_ml, p_ml, ci_ml = avg_P(cube=ml_cube, binsize=1.5, logspacing=False)
+f_ks, p_ks, ci_ks = avg_P(cube=ks_cube, binsize=1.5, logspacing=False)
+f_wiener, p_wiener, ci_wiener = avg_P(cube=wiener_cube, binsize=1.5, logspacing=False)
+f_sparse, p_sparse, ci_sparse = avg_P(cube=sparse_cube, binsize=1.5, logspacing=False)
+f_mcalens, p_mcalens, ci_mcalens = avg_P(cube=mcalens_cube, binsize=1.5, logspacing=False)
 # %%
-plt.figure(figsize=(7, 5))
+plt.figure(figsize=(7, 7))
+gs = gridspec.GridSpec(2, 1, height_ratios=[4, 1])
+plt.subplot(gs[0])
 plt.title('1D Power Spectrum')
-plot_pspec(xvals=f_true, ps1D=p_true, logy=True, label='true', c='k')
-plot_pspec(xvals=f_ml, ps1D=p_ml, logy=True, label='ml')
-# plot_pspec(xvals=f_ks, ps1D=p_ks, logy=True, label='ks')
-plot_pspec(xvals=f_wiener, ps1D=p_wiener, logy=True, label='wiener')
-# plot_pspec(xvals=f_sparse, ps1D=p_sparse, logy=True, label='sparse')
-# plot_pspec(xvals=f_mcalens, ps1D=p_mcalens, logy=True, label='mcalens')
-plt.xlabel("Spatial Frequency (1 / arcmin)")
+plot_pspec(xvals=f_true, ps1D=p_true, yerr=ci_true, logy=True, label='true', c='k', errfmt='bar')
+plot_pspec(xvals=f_ml, ps1D=p_ml, yerr=ci_ml, logy=True, label='ml', c='tab:blue')
+# plot_pspec(xvals=f_ks, ps1D=p_ks, yerr=ci_ks, logy=True, label='ks')
+plot_pspec(xvals=f_wiener, ps1D=p_wiener, yerr=ci_wiener, logy=True, label='wiener', c='tab:orange')
+# plot_pspec(xvals=f_sparse, ps1D=p_sparse, yerr=ci_sparse, logy=True, label='sparse')
+plot_pspec(xvals=f_mcalens, ps1D=p_mcalens, yerr=ci_mcalens, logy=True, label='mcalens', c='tab:brown')
 plt.ylabel(r"$P(\kappa)$")
-# plt.xlim(1e-2, 2e-1)
-# plt.ylim(2e3, 3e5)
-plt.xlim(2e-2, 5e-1)
-plt.ylim(1e2, 2e4)
+plt.xlim(right=2e-1)
+plt.ylim(1e2, 3e4)
 plt.grid(True)
 plt.legend()
 
+# power spectrum ratio (residual)
+plt.subplot(gs[1])
+plot_pspec(xvals=f_true, ps1D=p_ml/p_true, logy=False, label='ml', c='tab:blue')
+plot_pspec(xvals=f_true, ps1D=p_wiener/p_true, logy=False, label='wiener', c='tab:orange')
+plot_pspec(xvals=f_true, ps1D=p_mcalens/p_true, logy=False, label='mcalens', c='tab:brown')
+plt.axhline(y=1.0, color='tab:red', linestyle='--', alpha=0.7)
+plt.xlim(right=2e-1)
+plt.ylim(0.9, 1.1)
+plt.axhspan(0.97, 1.03, alpha=0.2)
+plt.xlabel("Spatial Frequency (1 / arcmin)")
+plt.ylabel(r"$P(\rm{pred}) \, / \, P(\rm{true})$")
+plt.tight_layout()
+
 # %%
 # plot powerspec(true - pred) / powerspec(true)
-f_res_ml, p_res_ml = avg_P(cube=true_cube-ml_cube, binsize=0.8, logspacing=False)
-f_res_ks, p_res_ks = avg_P(cube=true_cube-ks_cube, binsize=0.8, logspacing=False)
-f_res_wiener, p_res_wiener = avg_P(cube=true_cube-wiener_cube, binsize=0.8, logspacing=False)
-f_res_sparse, p_res_sparse = avg_P(cube=true_cube-sparse_cube, binsize=0.8, logspacing=False)
-f_res_mcalens, p_res_mcalens = avg_P(cube=true_cube-mcalens_cube, binsize=0.8, logspacing=False)
+f_res_ml, p_res_ml, _ = avg_P(cube=true_cube-ml_cube, binsize=1.5, logspacing=False)
+# f_res_ks, p_res_ks, _ = avg_P(cube=true_cube-ks_cube, binsize=1.5, logspacing=False)
+f_res_wiener, p_res_wiener, _ = avg_P(cube=true_cube-wiener_cube, binsize=1.5, logspacing=False)
+f_res_sparse, p_res_sparse, _ = avg_P(cube=true_cube-sparse_cube, binsize=1.5, logspacing=False)
+# f_res_mcalens, p_res_mcalens, _ = avg_P(cube=true_cube-mcalens_cube, binsize=1.5, logspacing=False)
 
 plt.figure(figsize=(7, 5))
 plt.title(r"Normalized Power Spectrum $P_\Delta$ of Residual $\hat{\kappa} - \kappa_{\rm{truth}}$")
 plot_pspec(xvals=f_res_ml, ps1D=p_res_ml/p_true, logy=False, label='ml')
-plot_pspec(xvals=f_res_ks, ps1D=p_res_ks/p_true, logy=False, label='ks')
+# plot_pspec(xvals=f_res_ks, ps1D=p_res_ks/p_true, logy=False, label='ks')
 plot_pspec(xvals=f_res_wiener, ps1D=p_res_wiener/p_true, logy=False, label='wiener')
 plot_pspec(xvals=f_res_sparse, ps1D=p_res_sparse/p_true, logy=False, label='sparse')
-plot_pspec(xvals=f_res_mcalens, ps1D=p_res_mcalens/p_true, logy=False, label='mcalens')
+# plot_pspec(xvals=f_res_mcalens, ps1D=p_res_mcalens/p_true, logy=False, label='mcalens')
 plt.xlabel("Spatial Frequency (1 / arcmin)")
 plt.ylabel(r"$P_\Delta \, / \, P_{\rm{true}}$")
 plt.xlim(xmin=10**-1.7)
@@ -168,7 +191,6 @@ plt.ylabel(r"$\sqrt{\sum{(\rm{G}_\sigma(\hat{\kappa} - \kappa))^2} \, / \, \sum{
 plt.ylim(0, 1.2)
 plt.legend()
 
-
 # %%
 def draw_pix2pix(pred, true, label):
     fpred = sorted(pred.flatten())
@@ -203,11 +225,11 @@ plt.legend()
 # %%
 from astropy.visualization import hist
 
-true = true_cube[3]
-ml = ml_cube[3]
-ks = ks_cube[3]
-wiener = wiener_cube[3]
-sparse = sparse_cube[3]
+true = true_cube[1]
+ml = ml_cube[1]
+ks = ks_cube[1]
+wiener = wiener_cube[1]
+sparse = sparse_cube[1]
 
 ml_res = ml - true
 ks_res = ks - true
@@ -218,6 +240,35 @@ hist(ml_res.flatten(), bins=200, range=(-0.1, 0.1), histtype='step', label='ml')
 hist(wiener_res.flatten(), bins=200, range=(-0.1, 0.1), histtype='step', label='wiener')
 hist(sparse_res.flatten(), bins=200, range=(-0.1, 0.1), histtype='step', label='sparse')
 plt.legend()
+
+# %%
+plt.title('PDF for flattened maps')
+
+# t = (true.flatten() - np.mean(true)) / np.std(true)
+# m = (ml.flatten() - np.mean(ml)) / np.std(ml)
+# k = (ks.flatten() - np.mean(ks)) / np.std(ks)
+# w = (wiener.flatten() - np.mean(wiener)) / np.std(wiener)
+# s = (sparse.flatten() - np.mean(sparse)) / np.std(sparse)
+
+t = true.flatten()
+m = ml.flatten()
+k = ks.flatten()
+w = wiener.flatten()
+s = sparse.flatten()
+hist(t.flatten(), bins=200, range=(-0.05, 0.1), histtype='step', label='true', color='k')
+hist(m.flatten(), bins=200, range=(-0.05, 0.1), histtype='step', label='ml')
+hist(k.flatten(), bins=200, range=(-0.05, 0.1), histtype='step', label='ks')
+hist(w.flatten(), bins=200, range=(-0.05, 0.1), histtype='step', label='wiener')
+hist(s.flatten(), bins=200, range=(-0.05, 0.1), histtype='step', label='sparse')
+plt.legend()
+
+# sns.kdeplot(data=t.flatten(), bw_adjust=0.05, label='true', color='k')
+# sns.kdeplot(data=m.flatten(), bw_adjust=0.05, label='ml')
+# sns.kdeplot(data=k.flatten(), bw_adjust=0.05, label='ks')
+# sns.kdeplot(data=w.flatten(), bw_adjust=0.05, label='wiener')
+# sns.kdeplot(data=s.flatten(), bw_adjust=0.05, label='sparse')
+# plt.legend()
+# plt.xlim(-0.1,0.1)
 
 # %%
 sns.set_theme(style="dark")
@@ -297,7 +348,7 @@ plt.legend()
 
 # %%
 # draw 2D Power Spectrum
-from stats.summary_stats_func import pspec, draw6, cbar
+from summary_stats_func import pspec, draw6, cbar
 ps2D_true = pspec(img=true_cube[1])
 ps2D_ml = pspec(img=ml_cube[1])
 ps2D_ks = pspec(img=ks_cube[1])
@@ -318,7 +369,6 @@ plt.show()
 
 # %%
 from summary_stats_func import draw6, cbar
-from astropy.io import fits
 # load cube containing results from all prediction methods
 true = true_cube[0]
 ml = ml_cube[1]
@@ -337,4 +387,64 @@ draw6(5, true-ml-wiener, 'true-ml-wiener', **d)
 draw6(6, true-wiener, 'true-wiener', **d)
 cbar(fig, cax=plt.axes([0.88, 0.08, 0.04, 0.8]))
 plt.show()
+# %%
+# mass-sheet degeneracy
+t = np.mean(true_cube, axis=(1,2))
+m = np.mean(ml_cube, axis=(1,2))
+w = np.mean(wiener_cube, axis=(1,2))
+
+fig, ax = plt.subplots(figsize=(6, 6))
+plt.scatter(t, m, s=3, label='ml')
+sns.kdeplot(x=t.flatten(), y=m.flatten(), levels=5, color="tab:blue", linewidths=1, label="ML")
+plt.scatter(t, w, s=3, label='wiener')
+plt.title(r'mean $\kappa$ comparison', fontsize=16)
+plt.axline((0, 0), slope=1, linestyle='--', c='r', alpha=0.7)
+plt.ylabel(r'predicted $\hat{\kappa}$ mean')
+plt.xlabel(r'true $\kappa$ mean')
+plt.xlim(-0.01, 0.012)
+plt.ylim(-0.01, 0.012)
+ax.set_aspect('equal', adjustable='box')
+plt.grid(True)
+plt.legend()
+# %%
+_ = plt.hist(true_cube.flatten(), bins=200, density=True)
+_ = plt.hist(ml_cube.flatten(), bins=200, density=True)
+_ = plt.hist(wiener_cube.flatten(), bins=200, density=True)
+plt.xlim(-0.1, 0.1)
+
+# %%
+_ = plt.hist((true_cube.flatten()-np.mean(true_cube))/np.std(true_cube), bins=200, density=True)
+_ = plt.hist((ml_cube.flatten()-np.mean(ml_cube))/np.std(ml_cube), bins=200, density=True)
+_ = plt.hist((wiener_cube.flatten()-np.mean(wiener_cube))/np.std(wiener_cube), bins=200, density=True)
+plt.xlim(-5, 7)
+# %%
+# Plot 1D distribution (Korea)
+t = true_cube[0:200].flatten()
+m = ml_cube[0:200].flatten()
+w = wiener_cube[0:200].flatten()
+
+sns.kdeplot(data=t, bw_adjust=0.05, label='true', color='k')
+sns.kdeplot(data=m, bw_adjust=0.05, label='ml', color='b')
+sns.kdeplot(data=w, bw_adjust=0.05, label='wiener', color='orange')
+# plt.axvline(x=np.mean(t), color='k', linestyle='-', alpha=0.7)
+# plt.axvline(x=np.mean(m), color='r', linestyle='--', alpha=0.7)
+# plt.axvline(x=np.mean(w), color='orange', linestyle='--', alpha=0.7)
+plt.xlim(-0.05, 0.1)
+plt.legend()
+
+# %%
+# Plot normalized 1D distribution (Korea)
+t = true_cube[0:200].flatten()
+m = ml_cube[0:200].flatten()
+w = wiener_cube[0:200].flatten()
+
+# sns.kdeplot(data=(t-np.mean(t))/np.std(t), bw_adjust=0.05, label='true', color='k')
+# sns.kdeplot(data=(m-np.mean(m))/np.std(m), bw_adjust=0.05, label='ml', color='b')
+# sns.kdeplot(data=(w-np.mean(w))/np.std(w), bw_adjust=0.05, label='wiener', color='orange')
+sns.kdeplot(data=(t)/np.std(t), bw_adjust=0.05, label='true', color='k')
+sns.kdeplot(data=(m)/np.std(m), bw_adjust=0.05, label='ml', color='b')
+sns.kdeplot(data=(w)/np.std(w), bw_adjust=0.05, label='wiener', color='orange')
+plt.xlim(-5, 7)
+plt.legend()
+
 # %%
