@@ -5,14 +5,11 @@ import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib import gridspec
 import seaborn as sns
-import astropy.io.fits as fits
-matplotlib.rc_file_defaults()
 
 # %%
 from summary_stats_func import read_folder
-fnames = glob.glob('/Users/danny/Desktop/WL/kappa_map/result/master_cubes_bare_g20/*.fits')[:500]
+fnames = glob.glob('/Users/danny/Desktop/WL/kappa_map/result/semifinal_k2d_r16h_g20/*.fits')[:500]
 true_cube, ml_cube, ks_cube, wiener_cube, sparse_cube, mcalens_cube = read_folder(fnames)
-# ml_cube = ml_cube + wiener_cube
 
 # %% [markdown]
 # ## Peak Count
@@ -394,8 +391,8 @@ m = np.mean(ml_cube, axis=(1,2))
 w = np.mean(wiener_cube, axis=(1,2))
 
 fig, ax = plt.subplots(figsize=(6, 6))
-plt.scatter(t, m, s=3, label='ml')
-sns.kdeplot(x=t.flatten(), y=m.flatten(), levels=5, color="tab:blue", linewidths=1, label="ML")
+plt.scatter(t, m, s=3, label='ML')
+sns.kdeplot(x=t.flatten(), y=m.flatten(), levels=5, linewidths=1)
 plt.scatter(t, w, s=3, label='wiener')
 plt.title(r'mean $\kappa$ comparison', fontsize=16)
 plt.axline((0, 0), slope=1, linestyle='--', c='r', alpha=0.7)
@@ -404,7 +401,6 @@ plt.xlabel(r'true $\kappa$ mean')
 plt.xlim(-0.01, 0.012)
 plt.ylim(-0.01, 0.012)
 ax.set_aspect('equal', adjustable='box')
-plt.grid(True)
 plt.legend()
 # %%
 _ = plt.hist(true_cube.flatten(), bins=200, density=True)

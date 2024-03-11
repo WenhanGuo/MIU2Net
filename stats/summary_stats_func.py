@@ -162,14 +162,14 @@ def avg_P(cube, binsize=1.0, logspacing=False):
         std_ps = np.std(ps_cube, axis=0)
     return freqs, avg_ps, std_ps
 
-def pix_to_arcmin(pixel_value):
+def pix_to_arcmin(pixel_value, size=256):
     # Convert a value in pixel units to the given angular unit.
-    pixel_scale = 1.75*60/256 * u.arcmin / u.pix
+    pixel_scale = 1.75*60/size * u.arcmin / u.pix
     return pixel_value * pixel_scale
 
-def spatial_freq_unit_conversion(pixel_value):
+def spatial_freq_unit_conversion(pixel_value, size):
     # Same as pix_to_arcmin, but handles the inverse units.
-    return 1 / pix_to_arcmin(1 / pixel_value)
+    return 1 / pix_to_arcmin(1 / pixel_value, size=size)
 
 
 # binned MSE
@@ -247,17 +247,17 @@ def mse_at_all_scales(true_cube, pred_cube, gaussian_blur_std=[0, 2, 4, 6, 10]):
 
 # visualization functions
 # ----------------------------------
-def draw4(plot_id, data, title, scale=[-0.02, 0.05], cmap=plt.cm.jet, fontsize=18):
+def draw4(plot_id, data, title, scale=[-0.02, 0.05], cmap=plt.cm.jet):
     plt.subplot(2, 2, plot_id)
     plt.imshow(data, cmap=cmap, vmin=scale[0], vmax=scale[1])
-    plt.title(f'{title}', fontsize=fontsize)
+    plt.title(f'{title}')
     plt.xticks([])
     plt.yticks([])
 
-def draw6(plot_id, data, title, scale=[-0.02, 0.05], cmap=plt.cm.jet, fontsize=18):
+def draw6(plot_id, data, title, scale=[-0.02, 0.05], cmap=plt.cm.jet):
     plt.subplot(2, 3, plot_id)
     plt.imshow(data, cmap=cmap, vmin=scale[0], vmax=scale[1])
-    plt.title(f'{title}', fontsize=fontsize)
+    plt.title(f'{title}')
     plt.xticks([])
     plt.yticks([])
 
@@ -266,14 +266,16 @@ def cbar(fig, cax):
     fig.subplots_adjust(right=0.87)
     plt.colorbar(cax=cax, orientation="vertical")
 
-def plot_pspec(xvals, ps1D, logy, label, yerr=False, fmt=None, errfmt='shade', c=None):
-    xvals = spatial_freq_unit_conversion(xvals).value
+def plot_pspec(xvals, ps1D, logy, label, yerr=False, size=256, errfmt='shade', c=None, lw=None):
+    xvals = spatial_freq_unit_conversion(xvals, size=size).value
     plt.xscale('log')
     if logy == True:
         plt.yscale('log')
-    plt.plot(xvals, ps1D, c=c, label=label)
+    plt.plot(xvals, ps1D, c=c, label=label, lw=lw)
     if type(yerr) == np.ndarray:
         if errfmt == 'shade':
-            plt.fill_between(xvals, ps1D-yerr, ps1D+yerr, alpha=0.2, color=c)
+            plt.fill_between(xvals, ps1D-yerr, ps1D+yerr, alpha=0.15, color=c, lw=lw)
         elif errfmt == 'bar':
-            plt.errorbar(xvals, ps1D, yerr=yerr, c=c)
+            plt.errorbar(xvals, ps1D, yerr=yerr, c=c, lw=lw)
+        elif errfmt == None:
+            pass
