@@ -106,27 +106,17 @@ def pspec(img):
 
 # calculate radial average (1D ps) from 2D power spectrum
 def radial_pspec(ps2D, binsize=1.0, logspacing=False):
-    def make_radial_arrays(shape):
-        y_center = np.floor(shape[0] / 2.).astype(int)
-        x_center = np.floor(shape[1] / 2.).astype(int)
-        y = np.arange(-y_center, shape[0] - y_center)
-        x = np.arange(-x_center, shape[1] - x_center)
-        yy, xx = np.meshgrid(y, x, indexing='ij')
-        return yy, xx
     def make_radial_freq_arrays(shape):
         yfreqs = np.fft.fftshift(np.fft.fftfreq(shape[0]))
         xfreqs = np.fft.fftshift(np.fft.fftfreq(shape[1]))
         yy_freq, xx_freq = np.meshgrid(yfreqs, xfreqs, indexing='ij')
         return yy_freq[::-1], xx_freq[::-1]
 
-    yy, xx = make_radial_arrays(ps2D.shape)
-    dists = np.sqrt(yy**2 + xx**2)
-    nbins = int(64 / binsize)  # for no logspacing; we previously used nbins=80 for whole freq range
-    # nbins = int(np.round(dists.max() / binsize) + 1)  # nbins = 227 for 256x256 map
+    nbins = int(40 / binsize)  # for no logspacing; this corresponds to each bin's span approx r = 1 pixel in fft domain
     yy_freq, xx_freq = make_radial_freq_arrays(ps2D.shape)
     freqs_dist = np.sqrt(yy_freq**2 + xx_freq**2)
     zero_freq_val = freqs_dist[np.nonzero(freqs_dist)].min() / 2.
-    freqs_dist[freqs_dist == 0] = zero_freq_val
+    freqs_dist[np.isclose(freqs_dist, 0)] = zero_freq_val
 
     max_bin = 0.1
     min_bin = 1.0 / min(ps2D.shape)
@@ -266,16 +256,16 @@ def cbar(fig, cax):
     fig.subplots_adjust(right=0.87)
     plt.colorbar(cax=cax, orientation="vertical")
 
-def plot_pspec(xvals, ps1D, logy, label, yerr=False, size=256, errfmt='shade', c=None, lw=None):
+def plot_pspec(xvals, ps1D, logy, label, ls='-', yerr=False, size=256, errfmt='shade', c=None, lw=None):
     xvals = spatial_freq_unit_conversion(xvals, size=size).value
     plt.xscale('log')
     if logy == True:
         plt.yscale('log')
-    plt.plot(xvals, ps1D, c=c, label=label, lw=lw)
+    plt.plot(xvals, ps1D, ls=ls, c=c, label=label, lw=lw)
     if type(yerr) == np.ndarray:
         if errfmt == 'shade':
             plt.fill_between(xvals, ps1D-yerr, ps1D+yerr, alpha=0.15, color=c, lw=lw)
         elif errfmt == 'bar':
-            plt.errorbar(xvals, ps1D, yerr=yerr, c=c, lw=lw)
+            plt.errorbar(xvals, ps1D, yerr=yerr, ls=ls, c=c, lw=lw)
         elif errfmt == None:
             pass
