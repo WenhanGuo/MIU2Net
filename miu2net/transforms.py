@@ -10,7 +10,7 @@ from astropy.modeling.models import Disk2D
 from astropy.table import QTable
 from photutils.datasets import make_model_sources_image
 try:
-    import pysparse
+    import pysparse # type: ignore
 except ImportError:
     print(
         "Warning in transforms.py: do not find pysap bindings ==> use slow python code. "

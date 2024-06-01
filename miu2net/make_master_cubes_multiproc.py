@@ -7,7 +7,7 @@ from astropy.io import fits
 from my_cosmostat.astro.wl.mass_mapping import massmap2d, shear_data
 import glob
 try:
-    import pysparse
+    import pysparse # type: ignore
 except ImportError:
     print(
         "Warning in make_master_cubes_multiproc.py: do not find pysap bindings ==> use slow python code. "
