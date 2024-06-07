@@ -1,4 +1,4 @@
-from miu2net.model import u2net_full
+from model import u2net_full
 import torch
 from torch import nn
 import transforms as T

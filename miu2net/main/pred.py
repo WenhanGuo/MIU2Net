@@ -1,7 +1,7 @@
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '5'
 
-from miu2net.model import u2net_full
+from model import u2net_full
 import torch
 import transforms as T
 from my_dataset import ImageDataset

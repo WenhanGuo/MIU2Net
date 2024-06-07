@@ -1,21 +1,8 @@
-import torch
 from torch.utils.data import Dataset
-import transforms as T
-from torchvision.transforms import functional as F
-from torchvision.transforms import GaussianBlur
-from torchvision.transforms.functional import resize
-
 import os
 import numpy as np
-import pandas as pd
-
 import astropy.io.fits as fits
 from astropy.table import Table
-from astropy.constants import G
-from astropy.cosmology import WMAP9
-import astropy.units as u
-import astropy.cosmology.units as cu
-
 
 
 # Dataset class for our own data structure
