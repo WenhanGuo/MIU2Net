@@ -1,6 +1,5 @@
 import torch
 from torch import nn
-from pytorch_msssim import SSIM, MS_SSIM
 
 
 class FreqLoss(nn.Module):
@@ -71,32 +70,6 @@ class FreqLoss1D(nn.Module):
         return self.l1(ps_output, ps_target) * self.weight
 
 
-class MSSSIMLoss(nn.Module):
-    def __init__(self, weight=1):
-        super().__init__()
-        self.ms_ssim = MS_SSIM(win_size=11, win_sigma=1.5, data_range=1.0, channel=1)
-        self.weight = weight
-    
-    def forward(self, output, target):
-        denorm_target = (target - torch.min(target)) / (torch.max(target) - torch.min(target))
-        denorm_output = (output - torch.min(output)) / (torch.max(output) - torch.min(output))
-        loss = 1.0 - self.ms_ssim(denorm_output, denorm_target)
-        return loss * self.weight
-
-
-class SSIMLoss(nn.Module):
-    def __init__(self, weight=1):
-        super().__init__()
-        self.ssim = SSIM(win_size=11, win_sigma=1.5, data_range=1.0, channel=1)
-        self.weight = weight
-    
-    def forward(self, output, target):
-        denorm_target = (target - torch.min(target)) / (torch.max(target) - torch.min(target))
-        denorm_output = (output - torch.min(output)) / (torch.max(output) - torch.min(output))
-        loss = 1.0 - self.ssim(denorm_output, denorm_target)
-        return loss * self.weight
-
-
 class L1Mod(nn.Module):
     def __init__(self, weight=1):
         super().__init__()
@@ -143,8 +116,6 @@ def loss_fn_selector(args, device):
         spac_fn = HuberMod(delta=args.huber_delta, weight=1e4*a)
     elif args.spac_loss == 'l1':
         spac_fn = L1Mod(weight=1e3*a)
-    elif args.spac_loss == 'ms-ssim':
-        spac_fn = MSSSIMLoss(weight=10*a)
     elif args.spac_loss == 'charbonnier':
         spac_fn = CharbonnierLoss(weight=1e2*a)
     if args.spac_loss == 'huber-mean':

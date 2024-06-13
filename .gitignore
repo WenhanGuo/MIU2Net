@@ -1,5 +1,6 @@
 beta_archive/
 halo_archive/
 misc_archive/
+publish_figs.py
 .DS_Store
 __pycache__/

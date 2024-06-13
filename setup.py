@@ -14,11 +14,16 @@ setup(
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
+        "Topic :: Scientific/Engineering :: Artificial Intelligence",
+        "Topic :: Scientific/Engineering :: Astronomy",
+        "Topic :: Scientific/Engineering :: Physics",
     ],
     python_requires='>=3.6',
     install_requires=[
         "numpy",
-        "astropy",
+        "scipy",
+        "astropy>=5.0",
+        "scikit-learn>=1.0",
     ],
     license="MIT",
 )
