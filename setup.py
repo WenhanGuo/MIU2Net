@@ -2,9 +2,9 @@ from setuptools import setup, find_packages
 
 setup(
     name="miu2net",
-    version="1.0.0",
+    version="0.1.0",
     author="Wenhan Guo",
-    author_email="wgaa2021@mymail.pomona.edu",
+    author_email="gwh1703@gmail.com",
     description="Weak lensing mapping of dark matter based on ML methods",
     long_description=open('README.md').read(),
     long_description_content_type="text/markdown",
@@ -18,12 +18,12 @@ setup(
         "Topic :: Scientific/Engineering :: Astronomy",
         "Topic :: Scientific/Engineering :: Physics",
     ],
-    python_requires='>=3.6',
+    python_requires='>=3.7',
     install_requires=[
         "numpy",
         "scipy",
-        "astropy>=5.0",
-        "scikit-learn>=1.0",
+        "astropy>=4.0",
+        "scikit-learn>=0.20",
     ],
     license="MIT",
 )
