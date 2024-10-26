@@ -211,3 +211,103 @@ def u2net_full(out_ch: int = 1, in_ch: int = 2, mode: str = '1x1conv'):
     }
 
     return U2Net(cfg, out_ch, mode=mode)
+
+
+
+########################################################################
+# DeepMass network translated into PyTorch
+########################################################################
+
+class UNetDeepMass(nn.Module):
+    """
+    Adapted from DeepMass UNet
+    """
+
+    def __init__(self, channels=[1, 1]):
+        super(UNetDeepMass, self).__init__()
+        self.channels = channels
+
+        # Define the layers
+        self.conv1 = nn.Conv2d(channels[0], 16, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(16)
+
+        self.pool = nn.AvgPool2d(kernel_size=2, stride=2)
+
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(32)
+
+        self.conv3 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.bn3 = nn.BatchNorm2d(64)
+
+        self.conv4 = nn.Conv2d(64, 64, kernel_size=3, padding=1)
+        self.bn4 = nn.BatchNorm2d(64)
+
+        self.conv_deep = nn.Conv2d(64, 64, kernel_size=3, padding=1)
+        self.bn_deep = nn.BatchNorm2d(64)
+
+        self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+
+        self.conv_deep2 = nn.Conv2d(128, 64, kernel_size=3, padding=1)
+        self.bn_deep2 = nn.BatchNorm2d(64)
+
+        self.conv5 = nn.Conv2d(128, 64, kernel_size=3, padding=1)
+        self.bn5 = nn.BatchNorm2d(64)
+
+        self.conv6 = nn.Conv2d(96, 32, kernel_size=3, padding=1)
+        self.bn6 = nn.BatchNorm2d(32)
+
+        self.conv7 = nn.Conv2d(48, 16, kernel_size=3, padding=1)
+        self.conv_out = nn.Conv2d(16, channels[1], kernel_size=1)
+
+        self.activation = nn.Sigmoid()
+
+    def forward(self, x):
+        # Encoder
+        x1 = self.conv1(x)
+        x1 = nn.ReLU()(self.bn1(x1))
+
+        pool1 = self.pool(x1)
+        x2 = self.conv2(pool1)
+        x2 = nn.ReLU()(self.bn2(x2))
+
+        pool2 = self.pool(x2)
+        x3 = self.conv3(pool2)
+        x3 = nn.ReLU()(self.bn3(x3))
+
+        pool3 = self.pool(x3)
+        x4 = self.conv4(pool3)
+        x4 = nn.ReLU()(self.bn4(x4))
+
+        pool_deep = self.pool(x4)
+        xdeep = self.conv_deep(pool_deep)
+        xdeep = nn.ReLU()(self.bn_deep(xdeep))
+
+        # Decoder
+        updeep = self.upsample(xdeep)
+        mergedeep = torch.cat([x4, updeep], dim=1)
+
+        xdeep2 = self.conv_deep2(mergedeep)
+        xdeep2 = nn.ReLU()(self.bn_deep2(xdeep2))
+
+        up5 = self.upsample(xdeep2)
+        merge5 = torch.cat([x3, up5], dim=1)
+        merge5 = self.bn5(merge5)
+
+        x5 = self.conv5(merge5)
+        x5 = nn.ReLU()(x5)
+
+        up6 = self.upsample(x5)
+        merge6 = torch.cat([x2, up6], dim=1)
+        merge6 = self.bn6(merge6)
+
+        x6 = self.conv6(merge6)
+        x6 = nn.ReLU()(x6)
+
+        up7 = self.upsample(x6)
+        merge7 = torch.cat([x1, up7], dim=1)
+        merge7 = self.bn6(merge7)
+
+        x7 = self.conv7(merge7)
+        output = self.conv_out(x7)
+
+        return self.activation(output)

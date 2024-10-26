@@ -144,10 +144,15 @@ class AddGaussianNoise(object):
 class AddStarMask(object):
     def __init__(self, args, fill_value=0):
         self.size = args.resize
-        self.n_sources = int(1100 * args.mask_frac)
         self.model = Disk2D()
         self.rng = np.random.default_rng(seed=None)
         self.fill_value = fill_value
+        # initialize the number of sources to generate bright star mask
+        # 1100 will cover approx the right pixel counts for mask_frac
+        self.n_sources = int(1100 * args.mask_frac)
+        if args.rand_mask_frac == False:
+            # randomize between 0% and args.mask_frac % masked pixels
+            self.n_sources = int(self.n_sources * np.random.rand())
 
     def __call__(self, image, target):
         sources = QTable()

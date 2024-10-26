@@ -1,7 +1,7 @@
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '5'
 
-from model import u2net_full
+from model import u2net_full, UNetDeepMass
 import torch
 import transforms as T
 from my_dataset import ImageDataset
@@ -58,7 +58,11 @@ def main(args):
     elif args.ks == 'only' or args.wiener == 'only':
         in_channels = 1
     print('in_channels =', in_channels)
-    model = u2net_full(in_ch=in_channels)
+    if args.model == 'u2net':
+        model = u2net_full(in_ch=in_channels, mode=args.assemble_mode)
+    elif args.model == 'deepmass':
+        assert args.wiener == 'only'
+        model = UNetDeepMass()
     
     # load model weights
     print(f'initializing model using {args.load}.pth')
@@ -117,6 +121,7 @@ def main(args):
 
 def get_args():
     parser = argparse.ArgumentParser(description='Predict kappa from test shear')
+    parser.add_argument("--model", default='miu2net', type=str, choices=['u2net', 'deepmass'], help='which model to use')
     parser.add_argument('load', type=str, help='name of weights file')
     parser.add_argument("-g", "--n-galaxy", default=50, type=float, help='number of galaxies per arcmin (to determine noise level)')
     parser.add_argument("--noise-seed", default=1, type=int, help='how many noise realizations for each training image; 0 for new realization every time')
@@ -128,6 +133,7 @@ def get_args():
     parser.add_argument("--resize", default=256, type=int, help='downsample kappa to this size')
     parser.add_argument("--reduced-shear", default=False, action='store_true', help='use reduced shear (g) instead of shear (gamma)')
     parser.add_argument("--mask-frac", default=0, type=float, help='randomly mask this fraction of pixels')
+    parser.add_argument("--rand-mask-frac", default=False, action='store_true', help='if true, then randomize 0% - mask-frac% masked pixels; otherwise always generate mask-frac%')
     parser.add_argument("--ks", default='off', type=str, choices=['off', 'add', 'only'], help='KS93 deconvolution (no KS, KS as an extra channel, no shear and KS only)')
     parser.add_argument("--wiener", default='off', type=str, choices=['off', 'add', 'only'], help='Wiener reconstruction')
     parser.add_argument("--sparse", default='off', type=str, choices=['off', 'add', 'only'], help='sparse reconstruction')

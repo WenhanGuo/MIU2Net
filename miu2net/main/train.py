@@ -1,4 +1,4 @@
-from model import u2net_full
+from model import u2net_full, UNetDeepMass
 import torch
 from torch import nn
 import transforms as T
@@ -109,7 +109,11 @@ def main(args):
     elif args.ks == 'only' or args.wiener == 'only':
         in_channels = 1
     print('in_channels =', in_channels)
-    model = u2net_full(in_ch=in_channels, mode=args.assemble_mode)
+    if args.model == 'u2net':
+        model = u2net_full(in_ch=in_channels, mode=args.assemble_mode)
+    elif args.model == 'deepmass':
+        assert args.wiener == 'only'
+        model = UNetDeepMass()
     
     if args.load:
         print(f'initializing model using {args.load}.pth')
@@ -284,6 +288,7 @@ def get_args():
     import argparse
     parser = argparse.ArgumentParser(description='Train U2Net')
     parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/data_1024_2d', type=str, help='data directory')
+    parser.add_argument("--model", default='miu2net', type=str, choices=['u2net', 'deepmass'], help='which model to use')
     parser.add_argument("--gpu-ids", default='6', type=str, help='gpu id; multiple gpu use comma; e.g. 0,1,2')
     parser.add_argument("--cpu", default=32, type=int, help='number of cpu cores to use')
     parser.add_argument("-g", "--n-galaxy", default=50, type=float, help='number of galaxies per arcmin (to determine noise level)')
@@ -299,6 +304,7 @@ def get_args():
 
     parser.add_argument("--reduced-shear", default=False, action='store_true', help='use reduced shear (g) instead of shear (gamma)')
     parser.add_argument("--mask-frac", default=0, type=float, help='randomly mask this fraction of pixels')
+    parser.add_argument("--rand-mask-frac", default=False, action='store_true', help='if true, then randomize 0% - mask-frac% masked pixels; otherwise always generate mask-frac%')
     parser.add_argument("--ks", default='off', type=str, choices=['off', 'add', 'only'], help='KS93 deconvolution (no KS, KS as an extra channel, no shear and KS only)')
     parser.add_argument("--wiener", default='off', type=str, choices=['off', 'add', 'only'], help='Wiener reconstruction')
     parser.add_argument("--sparse", default='off', type=str, choices=['off', 'add', 'only'], help='sparse reconstruction')
