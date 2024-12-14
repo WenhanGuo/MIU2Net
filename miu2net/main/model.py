@@ -251,12 +251,14 @@ class UNetDeepMass(nn.Module):
         self.bn_deep2 = nn.BatchNorm2d(64)
 
         self.conv5 = nn.Conv2d(128, 64, kernel_size=3, padding=1)
-        self.bn5 = nn.BatchNorm2d(64)
+        self.bn5 = nn.BatchNorm2d(128)
 
         self.conv6 = nn.Conv2d(96, 32, kernel_size=3, padding=1)
-        self.bn6 = nn.BatchNorm2d(32)
+        self.bn6 = nn.BatchNorm2d(96)
 
         self.conv7 = nn.Conv2d(48, 16, kernel_size=3, padding=1)
+        self.bn7 = nn.BatchNorm2d(48)
+
         self.conv_out = nn.Conv2d(16, channels[1], kernel_size=1)
 
         self.activation = nn.Sigmoid()
@@ -305,7 +307,7 @@ class UNetDeepMass(nn.Module):
 
         up7 = self.upsample(x6)
         merge7 = torch.cat([x1, up7], dim=1)
-        merge7 = self.bn6(merge7)
+        merge7 = self.bn7(merge7)
 
         x7 = self.conv7(merge7)
         output = self.conv_out(x7)
