@@ -40,7 +40,10 @@ def save_cube(true, ml, ks, wiener, sparse, mcalens, save_dir, save_name):
 
 def make_cube(args, fname):
     basename = os.path.basename(fname)
-    noisy_shear_name = basename[5:-13] + 'noisy_shear.fits'
+    if args.cosmo2:
+        noisy_shear_name = basename[5:-10] + 'noisy_shear.fits'  # for cosmology 2
+    else:
+        noisy_shear_name = basename[5:-13] + 'noisy_shear.fits'
     noisy_shear_path = os.path.join(args.shear_dir, noisy_shear_name)
     with fits.open(noisy_shear_path) as f:
         cube = f[0].data
@@ -60,6 +63,12 @@ def make_cube(args, fname):
     CovMat = np.ones((args.crop, args.crop)) * (noise_std**2)
     D.Ncov = downsample(CovMat, size=args.resize)
     D.nx, D.ny = args.resize, args.resize
+    
+    # star mask locations
+    ind = np.where(shear1 == 0)
+    D.mask = np.ones((D.nx, D.ny))
+    D.mask[ind] = 0
+    # print('# pixels with shear data =', sum(D.mask.flatten()))
 
     # create the mass mapping structure and initialize it
     M = massmap2d(name='mass')
@@ -67,18 +76,22 @@ def make_cube(args, fname):
     psWT_gen2 = pysparse.MRStarlet(bord=1, gen2=True, nb_procs=1, verbose=0)
     M.init_massmap(nx=args.resize, ny=args.resize, pass_class=[psWT_gen1, psWT_gen2])
 
-    p_signal = fits.open('./pspec/signal_power_spectrum.fits')[0].data
+    if args.cosmo2:
+        p_signal = fits.open('../pspec/signal_power_spectrum_cosmo2.fits')[0].data
+    else:
+        p_signal = fits.open('../pspec/signal_power_spectrum.fits')[0].data
+    
     if args.n_galaxy == 1059:
-        p_noise = fits.open('./pspec/noise_power_spectrum_g1059.fits')[0].data
-    if args.n_galaxy == 50:
-        p_noise = fits.open('./pspec/noise_power_spectrum_g50_256.fits')[0].data
-        # p_noise = fits.open('./pspec/noise_power_spectrum_g50.fits')[0].data
+        p_noise = fits.open('../pspec/noise_power_spectrum_g1059.fits')[0].data
+    elif args.n_galaxy == 50:
+        p_noise = fits.open('../pspec/noise_power_spectrum_g50_256.fits')[0].data
+        # p_noise = fits.open('../pspec/noise_power_spectrum_g50.fits')[0].data
     elif args.n_galaxy == 30:
-        p_noise = fits.open('./pspec/noise_power_spectrum_g30.fits')[0].data
+        p_noise = fits.open('../pspec/noise_power_spectrum_g30.fits')[0].data
     elif args.n_galaxy == 20:
-        p_noise = fits.open('./pspec/noise_power_spectrum_g20.fits')[0].data
+        p_noise = fits.open('../pspec/noise_power_spectrum_g20.fits')[0].data
     elif args.n_galaxy == 5:
-        p_noise = fits.open('./pspec/noise_power_spectrum_g5.fits')[0].data
+        p_noise = fits.open('../pspec/noise_power_spectrum_g5.fits')[0].data
 
     # ks reconstruction
     ks =  M.g2k(D.g1, D.g2, pass_class=[psWT_gen1, psWT_gen2])
@@ -95,7 +108,7 @@ def make_cube(args, fname):
                                niter=12, 
                                Nsigma=5, 
                                ThresCoarse=False, 
-                               Inpaint=False, 
+                               Inpaint=True, 
                                pass_class=[psWT_gen1, psWT_gen2])
 
     # mcalens reconstruction
@@ -103,8 +116,8 @@ def make_cube(args, fname):
                                                     PowSpecSignal=p_signal,
                                                     niter=12, 
                                                     Nsigma=5, 
-                                                    Inpaint=False, 
-                                                    Bmode=False, 
+                                                    Inpaint=True, 
+                                                    Bmode=True, 
                                                     ktr=None, 
                                                     pass_class=[psWT_gen1, psWT_gen2])
 
@@ -114,21 +127,22 @@ def make_cube(args, fname):
 def get_args():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/kappa_map/result/prediction', type=str)
-    parser.add_argument("--shear-dir", default='/share/lirui/Wenhan/WL/kappa_map/result/noisy_shear', type=str)
-    parser.add_argument("--save-dir", default='/share/lirui/Wenhan/WL/kappa_map/result/master_cubes', type=str)
-    parser.add_argument("--cpu", default=20, type=int, help='number of cpu cores to use for multiprocessing')
+    parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/kappa_map/miu2net/result/prediction', type=str)
+    parser.add_argument("--shear-dir", default='/share/lirui/Wenhan/WL/kappa_map/miu2net/result/noisy_shear', type=str)
+    parser.add_argument("--save-dir", default='/share/lirui/Wenhan/WL/kappa_map/miu2net/result/master_cubes', type=str)
+    parser.add_argument("--cpu", default=8, type=int, help='number of cpu cores to use for multiprocessing')
     parser.add_argument("-g", "--n-galaxy", default=50, type=float)
     parser.add_argument("--pred-id", default=3, type=int, help='id number of prediction frame, starting from 0')
     parser.add_argument("--true-id", default=2, type=int, help='id number of true frame, starting from 0')
     parser.add_argument("--crop", default=512, type=int, help='kappa size to crop (stored shear size)')
     parser.add_argument("--resize", default=256, type=int, help='kappa size to downsample')
+    parser.add_argument("--cosmo2", default=False, action='store_true', help='if using cosmology2')
     return parser.parse_args()
 
 
 if __name__ == '__main__':
     args = get_args()
-    fnames = glob.glob1(args.dir, '*.fits')
+    fnames = sorted(glob.glob1(args.dir, '*.fits'))
     with multiprocessing.Pool(processes=args.cpu) as pool:
         arguments = [(args, fname) for fname in fnames]
         pool.starmap(func=make_cube, iterable=arguments)

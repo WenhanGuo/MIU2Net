@@ -4,11 +4,13 @@ from torchvision.transforms import transforms as T
 import random
 import numpy as np
 from typing import Sequence
-from my_cosmostat.astro.wl.mass_mapping import massmap2d, shear_data
 from astropy.io import fits
 from astropy.modeling.models import Disk2D
 from astropy.table import QTable
 from photutils.datasets import make_model_sources_image
+import sys
+sys.path.append('/share/lirui/Wenhan/WL/kappa_map/miu2net/my_cosmostat')
+from my_cosmostat.astro.wl.mass_mapping import massmap2d, shear_data
 try:
     import pysparse # type: ignore
 except ImportError:
@@ -112,7 +114,7 @@ class AddGaussianNoise(object):
     def __init__(self, args):
         """
         calculate the gaussian noise standard deviation to be added to shear.
-        please refer to https://articles.adsabs.harvard.edu/pdf/2004MNRAS.350..893H Eq.12. 面积替换为方形的
+        please refer to https://articles.adsabs.harvard.edu/pdf/2004MNRAS.350..893H Eq.18
         noise_std^2 = {sigma_e^2 / 2} / {θ_G^2 * n_galaxy}
         """
         self.n_galaxy = args.n_galaxy
@@ -222,11 +224,14 @@ class Wiener(object):
     """
     def __init__(self, args):
         self.mode = args.wiener
-        self.p_signal = fits.open('./pspec/signal_power_spectrum.fits')[0].data
+        if args.cosmo2:
+            self.p_signal = fits.open('../pspec/signal_power_spectrum_cosmo2.fits')[0].data
+        else:
+            self.p_signal = fits.open('../pspec/signal_power_spectrum.fits')[0].data
         if args.n_galaxy == 50:
-            self.p_noise = fits.open('./pspec/noise_power_spectrum_g50.fits')[0].data
+            self.p_noise = fits.open('../pspec/noise_power_spectrum_g50.fits')[0].data
         elif args.n_galaxy == 20:
-            self.p_noise = fits.open('./pspec/noise_power_spectrum_g20.fits')[0].data
+            self.p_noise = fits.open('../pspec/noise_power_spectrum_g20.fits')[0].data
         # Create the cosmostat mass mapping structure and initialize it
         self.M = massmap2d(name='mass_wiener')
         self.psWT_gen1 = pysparse.MRStarlet(bord=1, gen2=False, nb_procs=1, verbose=0)
@@ -308,7 +313,10 @@ class MCALens(object):
     """
     def __init__(self, args):
         self.mode = args.mcalens
-        self.p_signal = fits.open('./pspec/signal_power_spectrum.fits')[0].data
+        if args.cosmo2:
+            self.p_signal = fits.open('../pspec/signal_power_spectrum_cosmo2.fits')[0].data
+        else:
+            self.p_signal = fits.open('../pspec/signal_power_spectrum.fits')[0].data
         self.M = massmap2d(name='mass_mcalens')
         self.psWT_gen1 = pysparse.MRStarlet(bord=1, gen2=False, nb_procs=1, verbose=0)
         self.psWT_gen2 = pysparse.MRStarlet(bord=1, gen2=True, nb_procs=1, verbose=0)
@@ -344,8 +352,6 @@ class MCALens(object):
         
         elif self.mode == 'add':
             mca_kappa, _, _, _ = self.mcalens(np.float32(image[0]), np.float32(image[1]))   # negative sign is important
-            # mca_kappa = torch.FloatTensor(mca_kappa)
             mca_kappa = np.float32(mca_kappa)
-            # image = torch.concat((image, mca_kappa.unsqueeze(0)), dim=0)
             image = np.concatenate([image, np.expand_dims(mca_kappa, axis=0)], axis=0)
             return image, target

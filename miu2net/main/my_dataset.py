@@ -22,6 +22,7 @@ class ImageDataset(Dataset):
         self.save_noisy_shear = args.save_noisy_shear
         self.save_noisy_shear_dir = args.save_noisy_shear_dir
         self.wiener_res = args.wiener_res
+        self.cosmo2 = args.cosmo2
 
     def __len__(self):
         return len(self.img_names)
@@ -52,7 +53,10 @@ class ImageDataset(Dataset):
 
         # save noisy shear data
         if self.save_noisy_shear == True:
-            save_name = os.path.basename(g1name)[:-14] + 'noisy_shear.fits'
+            if self.cosmo2:
+                save_name = os.path.basename(g1name)[:-11] + 'noisy_shear.fits'  # for cosmology 2
+            else:
+                save_name = os.path.basename(g1name)[:-14] + 'noisy_shear.fits'
             save_path = os.path.join(self.save_noisy_shear_dir, save_name)
             fits.writeto(save_path, np.float32(image), overwrite=True)
 

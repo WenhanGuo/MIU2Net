@@ -219,6 +219,7 @@ def get_args():
     parser.add_argument("--wiener", default='off', type=str, choices=['off', 'add', 'only'], help='Wiener reconstruction')
     parser.add_argument("--sparse", default='off', type=str, choices=['off', 'add', 'only'], help='sparse reconstruction')
     parser.add_argument("--mcalens", default='off', type=str, choices=['off', 'add', 'only'], help='MCALens reconstruction')
+    parser.add_argument("--cosmo2", default=False, action='store_true', help='if using cosmology2')
 
     parser.add_argument("--spac-loss", default='huber', type=str, choices=['huber', 'l1', 'ssim', 'ms-ssim', 'charbonnier', 'huber-mean'], help='spatial domain loss function')
     parser.add_argument("--freq-loss", default=None, type=str, choices=['freq', 'freq1d'], help='frequency domain loss function')

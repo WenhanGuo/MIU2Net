@@ -121,6 +121,7 @@ def get_args():
     parser.add_argument("--wiener-res", default=False, action='store_true', help='if the target is true - wiener')
     parser.add_argument("--save-noisy-shear", default=True, type=bool, help='write shear with added gaussian noise to disk')
     parser.add_argument("--save-noisy-shear-dir", default='/share/lirui/Wenhan/WL/kappa_map/miu2net/result/noisy_shear', type=str)
+    parser.add_argument("--cosmo2", default=False, action='store_true', help='if using cosmology2')
     return parser.parse_args()
 
 

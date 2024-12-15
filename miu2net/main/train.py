@@ -1,4 +1,4 @@
-from model import u2net_full, UNetDeepMass
+from model import u2net_full
 import torch
 from torch import nn
 import transforms as T
@@ -109,11 +109,7 @@ def main(args):
     elif args.ks == 'only' or args.wiener == 'only':
         in_channels = 1
     print('in_channels =', in_channels)
-    if args.model == 'u2net':
-        model = u2net_full(in_ch=in_channels, mode=args.assemble_mode)
-    elif args.model == 'deepmass':
-        assert args.wiener == 'only'
-        model = UNetDeepMass()
+    model = u2net_full(in_ch=in_channels, mode=args.assemble_mode)
     
     if args.load:
         print(f'initializing model using {args.load}.pth')
@@ -152,10 +148,10 @@ def main(args):
     scaler = torch.cuda.amp.GradScaler() if args.mixed_precision == True else None
 
     # use tensorboard to visualize computation
-    writer = SummaryWriter('../tlogs_k2d')
+    writer = SummaryWriter('../logs/miu2net')
     # delete existing tensorboard logs
-    shutil.rmtree('../tlogs_k2d')
-    os.mkdir('../tlogs_k2d')
+    shutil.rmtree('../logs/miu2net')
+    os.mkdir('../logs/miu2net')
 
     # begin training
     total_train_step = 0
@@ -166,9 +162,9 @@ def main(args):
         model.train()
         for image, target in train_loader:
             image = image.to(device, memory_format=torch.channels_last)
-            # image shape: (batchsize, 3 or 4, 512, 512)
+            # image shape: (batchsize, 3 or 4, 256, 256)
             target = target.to(device, memory_format=torch.channels_last)
-            # target shape: (batchsize, 1, 512, 512)
+            # target shape: (batchsize, 1, 256, 256)
             
             with torch.cuda.amp.autocast(enabled=scaler is not None):
                 outputs = model(image)
@@ -286,9 +282,8 @@ def main(args):
 
 def get_args():
     import argparse
-    parser = argparse.ArgumentParser(description='Train U2Net')
+    parser = argparse.ArgumentParser(description='Train MIU2Net')
     parser.add_argument("--dir", default='/share/lirui/Wenhan/WL/data_1024_2d', type=str, help='data directory')
-    parser.add_argument("--model", default='miu2net', type=str, choices=['u2net', 'deepmass'], help='which model to use')
     parser.add_argument("--gpu-ids", default='6', type=str, help='gpu id; multiple gpu use comma; e.g. 0,1,2')
     parser.add_argument("--cpu", default=32, type=int, help='number of cpu cores to use')
     parser.add_argument("-g", "--n-galaxy", default=50, type=float, help='number of galaxies per arcmin (to determine noise level)')
@@ -309,6 +304,7 @@ def get_args():
     parser.add_argument("--wiener", default='off', type=str, choices=['off', 'add', 'only'], help='Wiener reconstruction')
     parser.add_argument("--sparse", default='off', type=str, choices=['off', 'add', 'only'], help='sparse reconstruction')
     parser.add_argument("--mcalens", default='off', type=str, choices=['off', 'add', 'only'], help='MCALens reconstruction')
+    parser.add_argument("--cosmo2", default=False, action='store_true', help='if using cosmology2')
 
     parser.add_argument("--spac-loss", default='huber', type=str, choices=['huber', 'l1', 'ssim', 'ms-ssim', 'charbonnier', 'huber-mean'], help='spatial domain loss function')
     parser.add_argument("--freq-loss", default=None, type=str, choices=['freq', 'freq1d'], help='frequency domain loss function')
