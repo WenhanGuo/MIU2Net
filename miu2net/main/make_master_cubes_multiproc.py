@@ -56,8 +56,7 @@ def make_cube(args, fname):
 
     # initialize CosmoStat shear class
     D = shear_data()
-    # D.g1 = np.float32(-shear1)   # negative sign is important
-    D.g1 = np.float32(shear1)   # after fixing my_dataset
+    D.g1 = np.float32(-shear1)   # negative sign is important
     D.g2 = np.float32(shear2)
     noise_std = shape_noise(n_galaxy=args.n_galaxy)
     CovMat = np.ones((args.crop, args.crop)) * (noise_std**2)
