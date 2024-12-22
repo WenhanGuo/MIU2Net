@@ -152,16 +152,19 @@ class AddStarMask(object):
         # initialize the number of sources to generate bright star mask
         # 1100 will cover approx the right pixel counts for mask_frac
         self.n_sources = int(1100 * args.mask_frac)
-        if args.rand_mask_frac == False:
-            # randomize between 0% and args.mask_frac % masked pixels
-            self.n_sources = int(self.n_sources * np.random.rand())
+        self.rand_mask_frac = args.rand_mask_frac
 
     def __call__(self, image, target):
+        if self.rand_mask_frac == True:
+            # randomize between 0% and args.mask_frac % masked pixels
+            num = int(self.n_sources * np.random.rand())
+        else:
+            num = self.n_sources
         sources = QTable()
-        sources['amplitude'] = np.ones(self.n_sources)
-        sources['x_0'] = self.rng.uniform(low=0, high=self.size, size=self.n_sources)
-        sources['y_0'] = self.rng.uniform(low=0, high=self.size, size=self.n_sources)
-        sources['R_0'] = self.rng.power(a=0.3, size=self.n_sources) * 13
+        sources['amplitude'] = np.ones(num)
+        sources['x_0'] = self.rng.uniform(low=0, high=self.size, size=num)
+        sources['y_0'] = self.rng.uniform(low=0, high=self.size, size=num)
+        sources['R_0'] = self.rng.power(a=0.3, size=num) * 13
         data = make_model_sources_image(shape=(self.size, self.size), 
                                         model=self.model, 
                                         source_table=sources)
