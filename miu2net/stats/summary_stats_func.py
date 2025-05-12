@@ -152,6 +152,26 @@ def avg_P(cube, binsize=1.0, logspacing=False):
         std_ps = np.std(ps_cube, axis=0)
     return freqs, avg_ps, std_ps
 
+def jackknife_P(cube, binsize=1.0, logspacing=False):
+    ps_cube = []
+    for idx in range(len(cube)):
+        freqs, ps = P(cube[idx], binsize=binsize, logspacing=logspacing)
+        ps_cube.append(ps)
+    N = len(ps_cube)  # number of samples
+    ps_cube = np.array(ps_cube)                     # shape: (N, n_bins)
+    avg_ps = np.mean(ps_cube, axis=0)
+
+    # compute total sum across all samples for each bin
+    total_sum = np.sum(ps_cube, axis=0)             # shape: (n_bins)
+    # generate jackknife samples by leaving one sample out each time
+    jk_samples = (total_sum - ps_cube) / (N - 1)    # shape: (N, n_bins)
+    # compute mean of jackknife samples
+    jk_mean = np.mean(jk_samples, axis=0)           # shape: (n_bins)
+    # compute jackknife variance
+    variance = (N - 1) / N * np.sum((jk_samples - jk_mean) ** 2, axis=0)  # Shape: (n_bins,)
+    std_ps = np.sqrt(variance)                         # shape: (n_bins)
+    return freqs, avg_ps, std_ps
+
 def pix_to_arcmin(pixel_value, size=256):
     # Convert a value in pixel units to the given angular unit.
     pixel_scale = 1.75*60/size * u.arcmin / u.pix
@@ -214,10 +234,22 @@ def gb_mse(true_cube, pred_cube, gaussian_blur_std):
         mmse[n] = result
     return mmse.mean(), mmse.std()
 
+def gb_mse_without_mean(true_cube, pred_cube, gaussian_blur_std):
+    k = Gaussian2DKernel(gaussian_blur_std)
+    nimg = true_cube.shape[0]
+    mmse = np.empty(nimg, dtype=np.float32)
+    for n in range(nimg):
+        true = true_cube[n] - true_cube[n].mean()
+        pred = pred_cube[n] - pred_cube[n].mean()
+        gb_res = convolve(pred, kernel=k) - convolve(true, kernel=k)
+        result = np.sqrt((gb_res ** 2).sum() / (true ** 2).sum())
+        mmse[n] = result
+    return mmse.mean(), mmse.std()
+
 def mse_at_all_scales(true_cube, pred_cube, gaussian_blur_std=[0, 2, 4, 6, 10]):
     mmse_list, errorbar_list = [], []
     for std in gaussian_blur_std:
-        mmse, errorbar = gb_mse(true_cube, pred_cube, std)
+        mmse, errorbar = gb_mse_without_mean(true_cube, pred_cube, std)
         mmse_list.append(mmse)
         errorbar_list.append(errorbar)
     return mmse_list, errorbar_list

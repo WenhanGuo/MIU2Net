@@ -47,10 +47,6 @@ class ImageDataset(Dataset):
         # apply transforms
         image, target = self.transforms(gamma, kappa)
 
-        # if self.wiener_res == True:
-        #     # target = true - wiener, assuming args.wiener == 'add' and image[2] is wiener
-        #     target = target - image[2]
-
         # save noisy shear data
         if self.save_noisy_shear == True:
             if self.cosmo2:
