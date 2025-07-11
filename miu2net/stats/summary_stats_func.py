@@ -19,7 +19,11 @@ def read_prediction(fname):
         wiener = cube[3]
         sparse = cube[4]
         mcalens = cube[5]
-    return true, ml, ks, wiener, sparse, mcalens
+        try:
+            mask = cube[6]
+        except:
+            mask = np.ones(true.shape)
+    return true, ml, ks, wiener, sparse, mcalens, mask
 
 def read_folder(fnames):
     N = len(fnames)
@@ -29,16 +33,18 @@ def read_folder(fnames):
     wiener_cube = []
     sparse_cube = []
     mcalens_cube = []
+    mask_cube = []
 
     for i in range(N):
         fname = fnames[i]
-        true, ml, ks, wiener, sparse, mcalens = read_prediction(fname)
+        true, ml, ks, wiener, sparse, mcalens, mask = read_prediction(fname)
         true_cube.append(true)
         ml_cube.append(ml)
         ks_cube.append(ks)
         wiener_cube.append(wiener)
         sparse_cube.append(sparse)
         mcalens_cube.append(mcalens)
+        mask_cube.append(mask)
     
     true_cube = np.array(true_cube)
     ml_cube = np.array(ml_cube)
@@ -46,8 +52,9 @@ def read_folder(fnames):
     wiener_cube = np.array(wiener_cube)
     sparse_cube = np.array(sparse_cube)
     mcalens_cube = np.array(mcalens_cube)
+    mask_cube = np.array(mask_cube)
 
-    return true_cube, ml_cube, ks_cube, wiener_cube, sparse_cube, mcalens_cube
+    return true_cube, ml_cube, ks_cube, wiener_cube, sparse_cube, mcalens_cube, mask_cube
 
 
 # peak count statistics
@@ -222,11 +229,14 @@ def mean_ssim(true_cube, pred_cube):
 
 # gaussian blurred relative MSE err
 # ----------------------------------
-def gb_mse(true_cube, pred_cube, gaussian_blur_std):
+def gb_mse(true_cube, pred_cube, mask_cube, gaussian_blur_std):
     k = Gaussian2DKernel(gaussian_blur_std)
     res_cube = pred_cube - true_cube
     nimg = true_cube.shape[0]
     mmse = np.empty(nimg, dtype=np.float32)
+    # only compare areas with data
+    true_cube = true_cube * mask_cube
+    pred_cube = pred_cube * mask_cube
     for n in range(nimg):
         true = true_cube[n]
         gb_res = convolve(res_cube[n], kernel=k)
@@ -234,10 +244,13 @@ def gb_mse(true_cube, pred_cube, gaussian_blur_std):
         mmse[n] = result
     return mmse.mean(), mmse.std()
 
-def gb_mse_without_mean(true_cube, pred_cube, gaussian_blur_std):
+def gb_mse_without_mean(true_cube, pred_cube, mask_cube, gaussian_blur_std):
     k = Gaussian2DKernel(gaussian_blur_std)
     nimg = true_cube.shape[0]
     mmse = np.empty(nimg, dtype=np.float32)
+    # only compare areas with data
+    true_cube = true_cube * mask_cube
+    pred_cube = pred_cube * mask_cube
     for n in range(nimg):
         true = true_cube[n] - true_cube[n].mean()
         pred = pred_cube[n] - pred_cube[n].mean()
@@ -246,10 +259,10 @@ def gb_mse_without_mean(true_cube, pred_cube, gaussian_blur_std):
         mmse[n] = result
     return mmse.mean(), mmse.std()
 
-def mse_at_all_scales(true_cube, pred_cube, gaussian_blur_std=[0, 2, 4, 6, 10]):
+def mse_at_all_scales(true_cube, pred_cube, mask_cube, gaussian_blur_std=[0, 2, 4, 6, 10]):
     mmse_list, errorbar_list = [], []
     for std in gaussian_blur_std:
-        mmse, errorbar = gb_mse_without_mean(true_cube, pred_cube, std)
+        mmse, errorbar = gb_mse_without_mean(true_cube, pred_cube, mask_cube, std)
         mmse_list.append(mmse)
         errorbar_list.append(errorbar)
     return mmse_list, errorbar_list

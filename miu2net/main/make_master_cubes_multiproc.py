@@ -26,14 +26,15 @@ def downsample(image, size):
     image = resize(image.unsqueeze(0), size=size, antialias=True)
     return image.numpy().astype(np.float32)[0]
 
-def save_cube(true, ml, ks, wiener, sparse, mcalens, save_dir, save_name):
+def save_cube(true, ml, ks, wiener, sparse, mcalens, mask, save_dir, save_name):
     true1 = np.expand_dims(true, axis=0)
     ml1 = np.expand_dims(ml, axis=0)
     ks1 = np.expand_dims(ks, axis=0)
     wiener1 = np.expand_dims(wiener, axis=0)
     sparse1 = np.expand_dims(sparse, axis=0)
     mcalens1 = np.expand_dims(mcalens, axis=0)
-    c = np.concatenate([true1, ml1, ks1, wiener1, sparse1, mcalens1])
+    mask1 = np.expand_dims(mask, axis=0)
+    c = np.concatenate([true1, ml1, ks1, wiener1, sparse1, mcalens1, mask1])
     fits.writeto(os.path.join(save_dir, save_name), data=np.float32(c), overwrite=True)
     print(f'saved cube {save_name}')
 
@@ -123,7 +124,7 @@ def make_cube(args, fname):
                                                     ktr=None, 
                                                     pass_class=[psWT_gen1, psWT_gen2])
 
-    save_cube(true, pred, ks, wiener, sparse, mcalens, save_dir=args.save_dir, save_name=fname)
+    save_cube(true, pred, ks, wiener, sparse, mcalens, D.mask, save_dir=args.save_dir, save_name=fname)
 
 
 def get_args():
